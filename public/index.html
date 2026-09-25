@@ -748,33 +748,50 @@
         symbol: raw.symbol || getApiSymbol(currentSymbol),
         timeframe: raw.timeframe || currentTimeframe,
         price: safeNumber(raw.price),
-        signal: signal.direction || analysis.bias || "WAIT",
+
+        signal: signal.direction || "WAIT",
+        bias: signal.bias || analysis.bias || "WAIT",
+        status: signal.status || analysis.status || "WAIT",
+        nearZone: Boolean(signal.nearZone ?? analysis.nearZone ?? false),
+
         confidence: safeNumber(signal.confidence ?? analysis.confidence),
+
         trend: signal.detail || analysis.zoneType || "WAIT",
+        reason:
+          signal.recommendation ||
+          analysis.zoneType ||
+          "กำลังรอการวิเคราะห์",
+
+        detail:
+          signal.detail ||
+          "ไม่มีรายละเอียด",
+
+        entries,
+
         entry: safeNumber(
           firstEntry.price,
           safeNumber(raw.tradeSetup?.buyPoint || raw.tradeSetup?.sellPoint)
         ),
+
         entryLow: safeNumber(firstEntry.price, 0),
         entryHigh: safeNumber(entries[entries.length - 1]?.price, 0),
-        tp1: safeNumber(targets.tp1),
-        tp2: safeNumber(targets.tp2),
-        tp3: safeNumber(targets.tp3),
-        sl: safeNumber(targets.sl),
+
+        tp1: targets.tp1 !== null && targets.tp1 !== undefined ? safeNumber(targets.tp1) : null,
+        tp2: targets.tp2 !== null && targets.tp2 !== undefined ? safeNumber(targets.tp2) : null,
+        tp3: targets.tp3 !== null && targets.tp3 !== undefined ? safeNumber(targets.tp3) : null,
+        sl: targets.sl !== null && targets.sl !== undefined ? safeNumber(targets.sl) : null,
+
         ema20: safeNumber(indicators.ema20),
         ema50: safeNumber(indicators.ema50),
         rsi: safeNumber(indicators.rsi),
         atr: safeNumber(indicators.atr),
+
         res1: safeNumber(levels.res1),
         res2: safeNumber(levels.res2),
         poc: safeNumber(levels.poc),
         sup1: safeNumber(levels.sup1),
         sup2: safeNumber(levels.sup2),
-        reason:
-          signal.recommendation ||
-          analysis.zoneType ||
-          "กำลังรอการวิเคราะห์",
-        detail: signal.detail || "ไม่มีรายละเอียด",
+
         updatedAt: raw.updatedAt || new Date().toISOString()
       };
     }
@@ -806,52 +823,74 @@
     }
 
     function renderEntries(data) {
-      const signal = String(data.signal || "WAIT").toUpperCase();
       const entryList = document.getElementById("entry-list");
 
-      if (signal === "WAIT" || !data.entry) {
+      const entries = Array.isArray(data.entries)
+        ? data.entries
+        : [];
+
+      const bias = String(data.bias || data.signal || "WAIT").toUpperCase();
+
+      if (entries.length === 0 || bias === "WAIT") {
         entryList.innerHTML = `
           <div class="wait-message">
             ยังไม่มีจุดเข้า<br>
-            รอให้แนวโน้มและราคาเข้าสู่โซนที่เหมาะสม
+            รอให้ระบบยืนยันทิศทางตลาด
           </div>
         `;
         return;
       }
 
-      const entry = safeNumber(data.entry);
-      const entryLow = safeNumber(data.entryLow, entry);
-      const entryHigh = safeNumber(data.entryHigh, entry);
+      const entryClass =
+        bias === "BUY"
+          ? "buy-text"
+          : "sell-text";
 
-      const entryClass = signal === "BUY" ? "buy-text" : "sell-text";
+      const zoneStatus =
+        data.nearZone
+          ? "ราคาอยู่ในโซนเข้าเทรด"
+          : "รอราคาย่อ/ดีดเข้าสู่โซน";
+
+      const rows = entries
+        .map((entry, index) => {
+          const price = safeNumber(entry.price);
+          const score = safeNumber(entry.score);
+
+          const label =
+            escapeHtml(
+              entry.label ||
+              `${bias} ไม้ ${index + 1}`
+            );
+
+          const zoneType =
+            escapeHtml(
+              entry.zoneType ||
+              "Trading Zone"
+            );
+
+          return `
+            <div class="entry-row">
+              <div>
+                <div>${label}</div>
+                <div class="target-subtitle">
+                  ${zoneType} | Score ${score}
+                </div>
+              </div>
+
+              <span class="entry-price ${entryClass}">
+                $${formatNumber(price)}
+              </span>
+            </div>
+          `;
+        })
+        .join("");
 
       entryList.innerHTML = `
-        <div class="entry-row">
-          <span>${signal} จุดหลัก</span>
-          <span class="entry-price ${entryClass}">
-            $${formatNumber(entry)}
-          </span>
+        <div class="target-subtitle" style="margin-bottom: 8px;">
+          แผน: ${bias} | ${zoneStatus}
         </div>
 
-        <div class="entry-row">
-          <div>
-            <div>โซนเริ่มต้น</div>
-            <div class="target-subtitle">Entry Zone Low</div>
-          </div>
-          <span class="entry-price ${entryClass}">
-            $${formatNumber(entryLow)}
-          </span>
-        </div>
-
-        <div class="entry-row">
-          <div>
-            <div>โซนสูงสุด</div>
-            <div class="target-subtitle">Entry Zone High</div>
-          </div>
-          <span class="entry-price ${entryClass}">
-            $${formatNumber(entryHigh)}
-          </span>
-        </div>
+        ${rows}
       `;
     }
 
@@ -859,10 +898,10 @@
       const targetList = document.getElementById("target-list");
 
       const hasTargets =
-        data.tp1 !== undefined ||
-        data.tp2 !== undefined ||
-        data.tp3 !== undefined ||
-        data.sl !== undefined;
+        data.tp1 !== null ||
+        data.tp2 !== null ||
+        data.tp3 !== null ||
+        data.sl !== null;
 
       if (!hasTargets) {
         targetList.innerHTML = `
@@ -874,25 +913,45 @@
         return;
       }
 
+      const direction =
+        String(
+          data.signal !== "WAIT"
+            ? data.signal
+            : data.bias || "BUY"
+        ).toUpperCase();
+
+      const priceClass =
+        direction === "SELL"
+          ? "sell-text"
+          : "buy-text";
+
       targetList.innerHTML = `
         <div class="target-row">
           <span>TP1</span>
-          <span class="target-price buy-text">$${formatNumber(data.tp1)}</span>
+          <span class="target-price ${priceClass}">
+            ${data.tp1 !== null ? "$" + formatNumber(data.tp1) : "-"}
+          </span>
         </div>
 
         <div class="target-row">
           <span>TP2</span>
-          <span class="target-price buy-text">$${formatNumber(data.tp2)}</span>
+          <span class="target-price ${priceClass}">
+            ${data.tp2 !== null ? "$" + formatNumber(data.tp2) : "-"}
+          </span>
         </div>
 
         <div class="target-row">
           <span>TP3</span>
-          <span class="target-price buy-text">$${formatNumber(data.tp3)}</span>
+          <span class="target-price ${priceClass}">
+            ${data.tp3 !== null ? "$" + formatNumber(data.tp3) : "-"}
+          </span>
         </div>
 
         <div class="target-row">
           <span>Stop Loss</span>
-          <span class="target-price sl-text">$${formatNumber(data.sl)}</span>
+          <span class="target-price sl-text">
+            ${data.sl !== null ? "$" + formatNumber(data.sl) : "-"}
+          </span>
         </div>
       `;
     }

@@ -400,10 +400,10 @@ function createTargets(direction, currentPrice, atr, zone, higherZone, symbol) {
 
   if (!zone) {
     return {
-      tp1: formatPrice(price, symbol),
-      tp2: formatPrice(price, symbol),
-      tp3: formatPrice(price, symbol),
-      sl: formatPrice(price, symbol)
+      tp1: null,
+      tp2: null,
+      tp3: null,
+      sl: null
     };
   }
 
@@ -445,10 +445,10 @@ function createTargets(direction, currentPrice, atr, zone, higherZone, symbol) {
   }
 
   return {
-    tp1: formatPrice(price, symbol),
-    tp2: formatPrice(price, symbol),
-    tp3: formatPrice(price, symbol),
-    sl: formatPrice(price, symbol)
+    tp1: null,
+    tp2: null,
+    tp3: null,
+    sl: null
   };
 }
 
@@ -519,28 +519,46 @@ function buildEntryAnalysis(symbol, currentPrice, timeframes) {
           candleConfirmed
         });
 
-  const activeSignal = bias !== "WAIT" && nearZone;
+  const hasTradingBias =
+    bias !== "WAIT" &&
+    selectedZone !== null;
 
-  const entries = activeSignal
-    ? createEntryNodes(bias, selectedZone, atr, score, symbol)
-    : [];
+  let entries = [];
+  let targets = {
+    tp1: null,
+    tp2: null,
+    tp3: null,
+    sl: null
+  };
 
-  const targets = activeSignal
-    ? createTargets(bias, price, atr, selectedZone, higherZone, symbol)
-    : {
-        tp1: formatPrice(price, symbol),
-        tp2: formatPrice(price, symbol),
-        tp3: formatPrice(price, symbol),
-        sl: formatPrice(price, symbol)
-      };
+  if (hasTradingBias) {
+    entries = createEntryNodes(
+      bias,
+      selectedZone,
+      atr,
+      score,
+      symbol
+    );
+
+    targets = createTargets(
+      bias,
+      price,
+      atr,
+      selectedZone,
+      higherZone,
+      symbol
+    );
+  }
 
   let status = "WAIT";
+  let activeSignal = false;
 
   if (bias !== "WAIT" && !nearZone) {
     status = "WAIT FOR PULLBACK";
   }
 
-  if (activeSignal) {
+  if (bias !== "WAIT" && selectedZone !== null) {
+    activeSignal = true;
     status = bias === "BUY" ? "BUY" : "SELL";
   }
 
@@ -548,6 +566,8 @@ function buildEntryAnalysis(symbol, currentPrice, timeframes) {
     bias,
     status,
     activeSignal,
+    nearZone,
+    hasTradingBias,
     zoneType,
     confidence: score,
     entries,
@@ -642,16 +662,23 @@ app.get("/api/dashboard-data", async (req, res) => {
 
     const selectedInterval = INTERVALS[timeframe] || INTERVALS.M15;
 
-    const [tick, selectedBars, m5Bars, m15Bars, h1Bars, h4Bars, dailyNews] =
-      await Promise.all([
-        bq.tick(symbol),
-        getBars(symbol, selectedInterval),
-        getBars(symbol, INTERVALS.M5),
-        getBars(symbol, INTERVALS.M15),
-        getBars(symbol, INTERVALS.H1),
-        getBars(symbol, INTERVALS.H4),
-        getNews()
-      ]);
+    const [
+      tick,
+      selectedBars,
+      m5Bars,
+      m15Bars,
+      h1Bars,
+      h4Bars,
+      dailyNews
+    ] = await Promise.all([
+      bq.tick(symbol),
+      getBars(symbol, selectedInterval),
+      getBars(symbol, INTERVALS.M5),
+      getBars(symbol, INTERVALS.M15),
+      getBars(symbol, INTERVALS.H1),
+      getBars(symbol, INTERVALS.H4),
+      getNews()
+    ]);
 
     const timeframes = {
       m5: analyzeTimeframe(m5Bars, symbol),
@@ -713,20 +740,37 @@ app.get("/api/dashboard-data", async (req, res) => {
           `EMA50: ${formatPrice(main.ema50, symbol)}`,
 
         recommendation,
+
         direction: entryAnalysis.activeSignal ? bias : "WAIT",
+        bias,
+
+        status: entryAnalysis.status,
+        nearZone: entryAnalysis.nearZone,
+
         confidence: entryAnalysis.confidence
       },
 
       tradeSetup: {
+        direction:
+          entryAnalysis.activeSignal
+            ? bias
+            : entryAnalysis.bias,
+
+        status: entryAnalysis.status,
+
+        entries: entryAnalysis.entries,
+
         buyPoint:
-          entryAnalysis.bias === "BUY" && entryAnalysis.entries[0]
+          bias === "BUY" &&
+          entryAnalysis.entries[0]
             ? entryAnalysis.entries[0].price
-            : formatPrice(main.support.high, symbol),
+            : null,
 
         sellPoint:
-          entryAnalysis.bias === "SELL" && entryAnalysis.entries[0]
+          bias === "SELL" &&
+          entryAnalysis.entries[0]
             ? entryAnalysis.entries[0].price
-            : formatPrice(main.resistance.low, symbol),
+            : null,
 
         tpLevel: entryAnalysis.targets.tp1,
         slLevel: entryAnalysis.targets.sl
