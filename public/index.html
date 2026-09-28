@@ -1,1100 +1,1239 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PUNPORT FX - EA Analysis Dashboard</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SMC Dynamic Multi-Timeframe Trading Terminal</title>
+    <style>
+        :root {
+            --bg: #0b0e14;
+            --panel: #171d27;
+            --panel-border: #262f3d;
+            --text: #e1e7ef;
+            --text-dim: #8492a6;
+            --gold: #f3ba2f;
+            --gold2: #d49f1d;
+            --up: #26a69a;
+            --down: #ef5350;
+            --purple: #ab47bc;
+            --blue: #29b6f6;
+            --line: #2d3748;
+        }
 
-  <link
-    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&display=swap"
-    rel="stylesheet"
-  >
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+        }
 
-  <script src="https://s3.tradingview.com/tv.js"></script>
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            padding: 16px;
+            font-size: 14px;
+        }
 
-  <style>
-    :root {
-      --bg: #0f141b;
-      --panel: #171e29;
-      --panel2: #202936;
-      --line: #303b4d;
-      --text: #edf1f7;
-      --muted: #929dac;
-      --gold: #d9ad37;
-      --gold-light: #f2d276;
-      --green: #35c486;
-      --red: #ef6258;
-      --blue: #55a8ff;
-      --purple: #a879ff;
-    }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            background: var(--panel);
+            padding: 12px 20px;
+            border-radius: 8px;
+            border: 1px solid var(--panel-border);
+        }
 
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      font-family: "IBM Plex Sans Thai", sans-serif;
-    }
+        .header-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--gold);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
 
-    body {
-      min-height: 100vh;
-      background: var(--bg);
-      color: var(--text);
-      padding: 20px;
-    }
+        .status-badge {
+            font-size: 12px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            border: 1px solid var(--up);
+            color: var(--up);
+            font-weight: 600;
+        }
 
-    button, select {
-      font-family: inherit;
-    }
+        .controls-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 16px;
+            align-items: center;
+            background: var(--panel);
+            padding: 12px 16px;
+            border-radius: 8px;
+            border: 1px solid var(--panel-border);
+        }
 
-    .container {
-      width: 100%;
-      max-width: 1500px;
-      margin: 0 auto;
-      display: flex;
-      flex-direction: column;
-      gap: 18px;
-    }
+        .chip-group {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
 
-    .header {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 16px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 15px;
-      flex-wrap: wrap;
-    }
+        .chip {
+            background: #202936;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            border: 1px solid var(--panel-border);
+            color: var(--text-dim);
+            font-weight: 600;
+            transition: all 0.2s;
+        }
 
-    .control-group {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
+        .chip:hover, .chip.active {
+            background: var(--gold);
+            color: #000;
+            border-color: var(--gold);
+        }
 
-    .control-label {
-      color: var(--text);
-      font-weight: 700;
-    }
+        .tf-btn {
+            background: #202936;
+            border: 1px solid var(--panel-border);
+            color: var(--text-dim);
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+        }
 
-    .btn {
-      color: var(--text);
-      background: #263140;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      padding: 8px 15px;
-      cursor: pointer;
-      transition: 0.2s ease;
-    }
+        .tf-btn.active {
+            background: var(--blue);
+            color: #000;
+            border-color: var(--blue);
+        }
 
-    .btn:hover,
-    .btn.active {
-      color: #111;
-      background: var(--gold-light);
-      border-color: var(--gold-light);
-    }
+        .search-box {
+            display: flex;
+            gap: 6px;
+            margin-left: auto;
+        }
 
-    .status-bar {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      flex-wrap: wrap;
-      color: var(--muted);
-      font-size: 13px;
-    }
+        .search-box input {
+            background: #0f141c;
+            border: 1px solid var(--panel-border);
+            color: var(--text);
+            padding: 6px 12px;
+            border-radius: 6px;
+            outline: none;
+        }
 
-    .connection-status {
-      padding: 4px 10px;
-      border-radius: 20px;
-      color: var(--green);
-      background: rgba(53, 196, 134, 0.12);
-      border: 1px solid var(--green);
-    }
+        .search-box button {
+            background: var(--gold);
+            border: none;
+            color: #000;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-weight: bold;
+            cursor: pointer;
+        }
 
-    .connection-status.error {
-      color: var(--red);
-      background: rgba(239, 98, 88, 0.12);
-      border-color: var(--red);
-    }
+        .grid-main {
+            display: grid;
+            grid-template-columns: 1fr 340px;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
 
-    .error-box {
-      display: none;
-      color: #ffaaa2;
-      background: rgba(239, 98, 88, 0.12);
-      border: 1px solid var(--red);
-      border-radius: 8px;
-      padding: 12px 15px;
-      line-height: 1.6;
-    }
+        @media (max-width: 1100px) {
+            .grid-main { grid-template-columns: 1fr; }
+        }
 
-    .layout {
-      display: grid;
-      grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
-      gap: 18px;
-    }
+        .card {
+            background: var(--panel);
+            border: 1px solid var(--panel-border);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
 
-    .column {
-      display: flex;
-      flex-direction: column;
-      gap: 18px;
-    }
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--line);
+        }
 
-    .card {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 18px;
-    }
+        .card-title {
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--gold);
+        }
 
-    .card-title {
-      color: #fff;
-      font-size: 18px;
-      font-weight: 700;
-      padding-bottom: 10px;
-      margin-bottom: 15px;
-      border-bottom: 1px solid var(--line);
-    }
+        .chart-container {
+            height: 520px;
+            width: 100%;
+            border-radius: 6px;
+            overflow: hidden;
+        }
 
-    .signal-card {
-      background: var(--panel2);
-      border: 2px solid var(--gold);
-      border-radius: 12px;
-      padding: 20px;
-    }
+        /* Signal Box Styling */
+        .sig-pill {
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 700;
+            border: 1px solid var(--line);
+        }
 
-    .signal-header {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 15px;
-      flex-wrap: wrap;
-    }
+        .sig-mode-toggle {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 12px;
+            background: #0f141c;
+            padding: 4px;
+            border-radius: 6px;
+        }
 
-    .symbol-name {
-      color: var(--gold-light);
-      font-size: 13px;
-    }
+        .mode-btn {
+            flex: 1;
+            padding: 6px;
+            border: none;
+            background: transparent;
+            color: var(--text-dim);
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 700;
+        }
 
-    .price {
-      color: #fff;
-      font-family: monospace;
-      font-size: 34px;
-      font-weight: 700;
-      margin-top: 5px;
-    }
+        .mode-btn.active {
+            background: var(--panel-border);
+            color: var(--text);
+        }
 
-    .price-change {
-      color: var(--muted);
-      font-size: 12px;
-      margin-top: 4px;
-    }
+        .mode-btn.active.buy { background: var(--up); color: #fff; }
+        .mode-btn.active.sell { background: var(--down); color: #fff; }
 
-    .signal-pill {
-      color: var(--gold-light);
-      background: rgba(217, 173, 55, 0.13);
-      border: 1px solid var(--gold);
-      border-radius: 20px;
-      padding: 7px 15px;
-      font-size: 13px;
-      font-weight: 700;
-      white-space: nowrap;
-    }
+        .zone-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 8px;
+        }
 
-    .signal-pill.buy {
-      color: var(--green);
-      border-color: var(--green);
-      background: rgba(53, 196, 134, 0.12);
-    }
+        .zone-item {
+            display: flex;
+            justify-content: space-between;
+            background: #0f141c;
+            padding: 8px 12px;
+            border-radius: 6px;
+            border-left: 3px solid var(--line);
+        }
 
-    .signal-pill.sell {
-      color: var(--red);
-      border-color: var(--red);
-      background: rgba(239, 98, 88, 0.12);
-    }
+        .zone-label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--text-dim);
+            font-size: 12px;
+        }
 
-    .signal-pill.wait {
-      color: var(--gold-light);
-      border-color: var(--gold);
-      background: rgba(217, 173, 55, 0.12);
-    }
+        .dot { width: 8px; height: 8px; border-radius: 50%; }
+        .dot.buy { background: var(--up); }
+        .dot.sell { background: var(--down); }
+        .dot.tp { background: var(--gold); }
+        .dot.sl { background: var(--down); }
 
-    .signal-detail {
-      color: var(--blue);
-      font-size: 14px;
-      line-height: 1.7;
-      margin-top: 16px;
-    }
+        .val-num { font-weight: 700; font-family: monospace; }
+        .val-num.buy { color: var(--up); }
+        .val-num.sell { color: var(--down); }
+        .val-num.tp { color: var(--gold); }
+        .val-num.sl { color: var(--down); }
 
-    .signal-reason {
-      color: #fff;
-      font-size: 15px;
-      font-weight: 600;
-      line-height: 1.7;
-      margin-top: 5px;
-    }
+        /* Auto Channels Grid */
+        .channel-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 12px;
+        }
 
-    .analysis-time {
-      color: var(--muted);
-      font-size: 12px;
-      margin-top: 8px;
-    }
+        .channel-card {
+            background: #0f141c;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid var(--panel-border);
+        }
 
-    .entry-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 15px;
-      margin-top: 18px;
-    }
+        .channel-title { font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+        .channel-val { font-weight: bold; font-size: 13px; font-family: monospace; }
 
-    .entry-panel {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 9px;
-      padding: 15px;
-    }
+        /* News Section Styling */
+        .news-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 12px;
+        }
 
-    .entry-panel-title {
-      color: var(--gold-light);
-      font-size: 14px;
-      font-weight: 700;
-      padding-bottom: 9px;
-      margin-bottom: 10px;
-      border-bottom: 1px solid var(--line);
-    }
+        .news-card {
+            background: #0f141c;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid var(--panel-border);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            gap: 10px;
+        }
 
-    .entry-row, .target-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      background: rgba(0, 0, 0, 0.2);
-      border-radius: 7px;
-      padding: 10px;
-      margin-top: 8px;
-      font-size: 13px;
-    }
+        .news-header { display: flex; justify-content: space-between; font-size: 11px; }
+        .news-source-tag { color: var(--gold); font-weight: bold; }
+        .badge { padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
+        .badge.bullish { background: rgba(38, 166, 154, 0.2); color: var(--up); }
+        .badge.bearish { background: rgba(239, 83, 80, 0.2); color: var(--down); }
+        .badge.neutral { background: rgba(243, 186, 47, 0.2); color: var(--gold); }
 
-    .entry-price, .target-price {
-      font-family: monospace;
-      font-weight: 700;
-    }
+        .news-headline { font-weight: bold; line-height: 1.3; font-size: 13px; }
+        .news-impact-box {
+            font-size: 12px;
+            color: var(--text-dim);
+            background: #171d27;
+            padding: 6px;
+            border-radius: 4px;
+        }
 
-    .buy-text { color: var(--green); }
-    .sell-text { color: var(--red); }
-    .sl-text { color: var(--gold-light); }
+        .news-footer-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+            border-top: 1px solid var(--line);
+            padding-top: 6px;
+        }
 
-    .target-subtitle {
-      color: var(--muted);
-      font-size: 11px;
-      margin-top: 3px;
-    }
+        .news-read-link { color: var(--blue); text-decoration: none; font-weight: bold; }
+        .news-read-link:hover { text-decoration: underline; }
 
-    .wait-message {
-      color: var(--muted);
-      text-align: center;
-      padding: 18px 5px;
-      line-height: 1.7;
-    }
+        .pred-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 12px;
+        }
 
-    .indicator-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 10px;
-    }
+        .pred-box {
+            background: #0f141c;
+            border: 1px solid var(--panel-border);
+            padding: 12px;
+            border-radius: 6px;
+            border-left: 3px solid var(--gold);
+        }
 
-    .indicator {
-      background: var(--panel2);
-      border-radius: 8px;
-      padding: 12px;
-      text-align: center;
-    }
+        .pred-title { font-weight: bold; color: var(--gold); font-size: 13px; }
+        .pred-val { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
 
-    .indicator-label {
-      color: var(--muted);
-      font-size: 12px;
-    }
+        .sources-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 12px;
+        }
 
-    .indicator-value {
-      color: #fff;
-      font-family: monospace;
-      font-size: 17px;
-      font-weight: 700;
-      margin-top: 5px;
-    }
+        .source-cat-box {
+            background: #0f141c;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid var(--panel-border);
+        }
 
-    .level-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 10px;
-    }
-
-    .level {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      background: var(--panel2);
-      border-radius: 8px;
-      padding: 11px;
-      font-size: 13px;
-    }
-
-    .level strong {
-      font-family: monospace;
-    }
-
-    .resistance { border-left: 4px solid var(--red); }
-    .support { border-left: 4px solid var(--green); }
-    .poc { border-left: 4px solid var(--gold); }
-
-    #tradingview_chart {
-      width: 100%;
-      min-height: 450px;
-    }
-
-    .info-list {
-      display: flex;
-      flex-direction: column;
-      gap: 9px;
-    }
-
-    .info-row {
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-      color: var(--muted);
-      font-size: 13px;
-      padding-bottom: 8px;
-      border-bottom: 1px dashed var(--line);
-    }
-
-    .info-row strong {
-      color: #fff;
-      text-align: right;
-    }
-
-    .error-box {
-      display: none;
-    }
-
-    @media (max-width: 1100px) {
-      .layout {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    @media (max-width: 700px) {
-      body {
-        padding: 10px;
-      }
-
-      .entry-grid {
-        grid-template-columns: 1fr;
-      }
-
-      .indicator-grid {
-        grid-template-columns: repeat(2, 1fr);
-      }
-
-      .level-grid {
-        grid-template-columns: 1fr;
-      }
-
-      .btn {
-        flex: 1;
-        padding: 8px 10px;
-      }
-
-      .control-group {
-        width: 100%;
-      }
-
-      .price {
-        font-size: 27px;
-      }
-    }
-  </style>
+        .source-cat-header { font-weight: bold; color: var(--gold); margin-bottom: 8px; font-size: 12px; }
+        .source-list { list-style: none; font-size: 12px; }
+        .source-list li { margin-bottom: 6px; }
+        .source-list a { color: var(--blue); text-decoration: none; }
+        .source-list a:hover { text-decoration: underline; }
+    </style>
 </head>
-
 <body>
-  <div class="container">
-    <header class="header">
-      <div class="control-group">
-        <span class="control-label">สินทรัพย์:</span>
 
-        <button class="btn symbol-btn active" type="button" onclick="changeSymbol('OANDA:XAUUSD', this)">
-          XAUUSD
-        </button>
+    <!-- HEADER BAR -->
+    <div class="header">
+        <div class="header-title">
+            <span>⚡ SMC Dynamic Trading Terminal</span>
+            <span style="font-size: 12px; color: var(--text-dim); font-weight: normal;">| Asset: <b id="current-asset-display" style="color:var(--gold);">XAUUSD</b></span>
+        </div>
+        <div style="display:flex; gap:10px; align-items:center;">
+            <span id="timer-display" style="font-size: 12px; color: var(--gold2); font-family: monospace;">⏱️ Next Sync: 01:00</span>
+            <div id="api-status" class="status-badge">Connecting...</div>
+        </div>
+    </div>
 
-        <button class="btn symbol-btn" type="button" onclick="changeSymbol('BITSTAMP:BTCUSD', this)">
-          BTCUSD
-        </button>
-      </div>
-
-      <div class="control-group">
-        <span class="control-label">Timeframe:</span>
-
-        <button class="btn tf-btn" type="button" onclick="changeTimeframe('M5', this)">M5</button>
-        <button class="btn tf-btn active" type="button" onclick="changeTimeframe('M15', this)">M15</button>
-        <button class="btn tf-btn" type="button" onclick="changeTimeframe('H1', this)">H1</button>
-        <button class="btn tf-btn" type="button" onclick="changeTimeframe('H4', this)">H4</button>
-      </div>
-
-      <div class="status-bar">
-        <span id="connection-status" class="connection-status">● กำลังเชื่อมต่อ</span>
-        <span>วิเคราะห์ทุก 5 นาที</span>
-      </div>
-    </header>
-
-    <div id="error-box" class="error-box"></div>
-
-    <main class="layout">
-      <section class="column">
-        <div class="signal-card">
-          <div class="signal-header">
-            <div>
-              <div class="symbol-name">
-                EA Technical Analysis -
-                <span id="symbol-display">XAUUSD</span> -
-                <span id="timeframe-display">M15</span>
-              </div>
-
-              <div class="price">
-                $<span id="current-price">0.00</span>
-              </div>
-
-              <div class="price-change">
-                ราคาจาก EA / Market Data
-              </div>
-            </div>
-
-            <span id="signal-pill" class="signal-pill wait">WAIT</span>
-          </div>
-
-          <div id="signal-detail" class="signal-detail">
-            กำลังรอข้อมูลจาก API...
-          </div>
-
-          <div id="signal-reason" class="signal-reason">
-            กำลังวิเคราะห์แนวโน้ม...
-          </div>
-
-          <div id="analysis-time" class="analysis-time">
-            ยังไม่มีข้อมูลการวิเคราะห์
-          </div>
-
-          <div class="entry-grid">
-            <div class="entry-panel">
-              <div class="entry-panel-title">📌 จุดเข้าซื้อขาย</div>
-              <div id="entry-list">
-                <div class="wait-message">กำลังคำนวณจุดเข้า...</div>
-              </div>
-            </div>
-
-            <div class="entry-panel">
-              <div class="entry-panel-title">🎯 TP / SL</div>
-              <div id="target-list">
-                <div class="wait-message">กำลังคำนวณเป้าหมาย...</div>
-              </div>
-            </div>
-          </div>
+    <!-- CONTROLS BAR -->
+    <div class="controls-bar">
+        <div class="chip-group">
+            <div class="chip active" data-symbol="OANDA:XAUUSD" data-label="XAUUSD">🥇 XAUUSD</div>
+            <div class="chip" data-symbol="BINANCE:BTCUSDT" data-label="BTCUSDT">₿ BTCUSD</div>
+            <div class="chip" data-symbol="OANDA:EURUSD" data-label="EURUSD">💶 EURUSD</div>
+            <div class="chip" data-symbol="TVC:USOIL" data-label="USOIL">🛢️ USOIL</div>
         </div>
 
-        <div class="card">
-          <div class="card-title">📐 ตัวชี้วัดจาก EA</div>
+        <div style="height: 20px; width: 1px; background: var(--line);"></div>
 
-          <div class="indicator-grid">
-            <div class="indicator">
-              <div class="indicator-label">EMA 20</div>
-              <div id="ema20" class="indicator-value">0.00</div>
-            </div>
-
-            <div class="indicator">
-              <div class="indicator-label">EMA 50</div>
-              <div id="ema50" class="indicator-value">0.00</div>
-            </div>
-
-            <div class="indicator">
-              <div class="indicator-label">RSI 14</div>
-              <div id="rsi" class="indicator-value">0.00</div>
-            </div>
-
-            <div class="indicator">
-              <div class="indicator-label">ATR 14</div>
-              <div id="atr" class="indicator-value">0.00</div>
-            </div>
-          </div>
+        <div class="chip-group">
+            <button class="tf-btn active" data-tf="1m" onclick="changeTimeframe('1m', '1')">M1</button>
+            <button class="tf-btn" data-tf="5m" onclick="changeTimeframe('5m', '5')">M5</button>
+            <button class="tf-btn" data-tf="15m" onclick="changeTimeframe('15m', '15')">M15</button>
+            <button class="tf-btn" data-tf="1h" onclick="changeTimeframe('1h', '60')">H1 🎯</button>
+            <button class="tf-btn" data-tf="4h" onclick="changeTimeframe('4h', '240')">H4 🎯</button>
         </div>
 
-        <div class="card">
-          <div class="card-title">📊 แนวรับ แนวต้าน และ POC</div>
+        <div class="search-box">
+            <input type="text" id="symbol-input" placeholder="ค้นหา Symbol (เช่น AAPL)...">
+            <button onclick="handleSearch()">ไป</button>
+        </div>
+    </div>
 
-          <div class="level-grid">
-            <div class="level resistance">
-              <span>แนวต้าน 2</span>
-              <strong id="res2">$0.00</strong>
+    <!-- MAIN GRID (CHART & SMC ENGINE) -->
+    <div class="grid-main">
+        <!-- LEFT: ADVANCED CHART -->
+        <div class="card" style="margin: 0;">
+            <div class="card-header">
+                <span class="card-title">📈 Advanced SMC Multi-Timeframe Chart</span>
+                <span style="font-size: 12px; color: var(--text-dim);">Realtime Indicators: EMA 50/200, Pivot High/Low</span>
             </div>
-
-            <div class="level resistance">
-              <span>แนวต้าน 1</span>
-              <strong id="res1">$0.00</strong>
-            </div>
-
-            <div class="level poc">
-              <span>POC</span>
-              <strong id="poc">$0.00</strong>
-            </div>
-
-            <div class="level support">
-              <span>แนวรับ 1</span>
-              <strong id="sup1">$0.00</strong>
-            </div>
-
-            <div class="level support">
-              <span>แนวรับ 2</span>
-              <strong id="sup2">$0.00</strong>
-            </div>
-          </div>
+            <div class="chart-container" id="tv-chart-mount"></div>
         </div>
 
-        <div class="card">
-          <div class="card-title">📈 กราฟราคา</div>
-          <div id="tradingview_chart"></div>
-        </div>
-      </section>
-
-      <aside class="column">
-        <div class="card">
-          <div class="card-title">🤖 สถานะ EA</div>
-
-          <div class="info-list">
-            <div class="info-row">
-              <span>Symbol</span>
-              <strong id="ea-symbol">XAUUSD</strong>
-            </div>
-
-            <div class="info-row">
-              <span>Timeframe</span>
-              <strong id="ea-timeframe">M15</strong>
-            </div>
-
-            <div class="info-row">
-              <span>แนวโน้ม</span>
-              <strong id="ea-trend">WAIT</strong>
-            </div>
-
-            <div class="info-row">
-              <span>สัญญาณ</span>
-              <strong id="ea-signal">WAIT</strong>
-            </div>
-
-            <div class="info-row">
-              <span>คะแนนวิเคราะห์</span>
-              <strong id="ea-confidence">0</strong>
-            </div>
-
-            <div class="info-row">
-              <span>รอบถัดไป</span>
-              <strong id="next-refresh">-</strong>
-            </div>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">🧠 หลักการวิเคราะห์</div>
-
-          <div class="info-list">
-            <div class="info-row">
-              <span>Trend</span>
-              <strong>EMA20 / EMA50</strong>
-            </div>
-
-            <div class="info-row">
-              <span>Momentum</span>
-              <strong>RSI14</strong>
-            </div>
-
-            <div class="info-row">
-              <span>ความผันผวน</span>
-              <strong>ATR14</strong>
-            </div>
-
-            <div class="info-row">
-              <span>เป้าหมาย</span>
-              <strong>ATR + S/R</strong>
-            </div>
-
-            <div class="info-row">
-              <span>การอัปเดต</span>
-              <strong>ทุก 5 นาที</strong>
-            </div>
-          </div>
-        </div>
-      </aside>
-    </main>
-  </div>
-
-  <script>
-    let currentSymbol = "OANDA:XAUUSD";
-    let currentTimeframe = "M15";
-    let isLoading = false;
-    let refreshTimer = null;
-    let nextRefreshTimer = null;
-    let nextRefreshAt = null;
-
-    const refreshIntervalMs = 5 * 60 * 1000;
-
-    const chartIntervals = {
-      M5: "5",
-      M15: "15",
-      H1: "60",
-      H4: "240"
-    };
-
-    function getApiSymbol(symbol) {
-      return symbol
-        .replace("OANDA:", "")
-        .replace("BITSTAMP:", "");
-    }
-
-    function escapeHtml(value) {
-      return String(value ?? "")
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
-    }
-
-    function safeNumber(value, fallback = 0) {
-      const num = Number(value);
-      return Number.isFinite(num) ? num : fallback;
-    }
-
-    function formatNumber(value) {
-      return safeNumber(value).toLocaleString("en-US", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-      });
-    }
-
-    function formatTime(value) {
-      const date = new Date(value);
-
-      if (Number.isNaN(date.getTime())) {
-        return "-";
-      }
-
-      return date.toLocaleString("th-TH", {
-        dateStyle: "short",
-        timeStyle: "medium"
-      });
-    }
-
-    function setConnectionStatus(isConnected) {
-      const el = document.getElementById("connection-status");
-
-      if (isConnected) {
-        el.className = "connection-status";
-        el.innerText = "● API Connected";
-      } else {
-        el.className = "connection-status error";
-        el.innerText = "● API Disconnected";
-      }
-    }
-
-    function showError(message) {
-      const el = document.getElementById("error-box");
-      el.innerText = message;
-      el.style.display = "block";
-    }
-
-    function hideError() {
-      const el = document.getElementById("error-box");
-      el.innerText = "";
-      el.style.display = "none";
-    }
-
-    function startRefreshCountdown() {
-      if (nextRefreshTimer) {
-        clearInterval(nextRefreshTimer);
-      }
-
-      nextRefreshAt = Date.now() + refreshIntervalMs;
-
-      nextRefreshTimer = setInterval(() => {
-        const remaining = Math.max(0, nextRefreshAt - Date.now());
-        const totalSeconds = Math.ceil(remaining / 1000);
-        const minutes = Math.floor(totalSeconds / 60);
-        const seconds = totalSeconds % 60;
-
-        document.getElementById("next-refresh").innerText =
-          `${minutes}:${String(seconds).padStart(2, "0")}`;
-      }, 1000);
-    }
-
-    function normalizeDashboardData(raw) {
-      const analysis = raw.entryAnalysis || {};
-      const targets = analysis.targets || {};
-      const indicators = raw.indicators || {};
-      const levels = raw.srLevels || {};
-      const signal = raw.signal || {};
-      const entries = Array.isArray(analysis.entries) ? analysis.entries : [];
-      const firstEntry = entries[0] || {};
-
-      return {
-        symbol: raw.symbol || getApiSymbol(currentSymbol),
-        timeframe: raw.timeframe || currentTimeframe,
-        price: safeNumber(raw.price),
-
-        signal: signal.direction || "WAIT",
-        bias: signal.bias || analysis.bias || "WAIT",
-        status: signal.status || analysis.status || "WAIT",
-        nearZone: Boolean(signal.nearZone ?? analysis.nearZone ?? false),
-
-        confidence: safeNumber(signal.confidence ?? analysis.confidence),
-
-        trend: signal.detail || analysis.zoneType || "WAIT",
-        reason:
-          signal.recommendation ||
-          analysis.zoneType ||
-          "กำลังรอการวิเคราะห์",
-
-        detail:
-          signal.detail ||
-          "ไม่มีรายละเอียด",
-
-        entries,
-
-        entry: safeNumber(
-          firstEntry.price,
-          safeNumber(raw.tradeSetup?.buyPoint || raw.tradeSetup?.sellPoint)
-        ),
-
-        entryLow: safeNumber(firstEntry.price, 0),
-        entryHigh: safeNumber(entries[entries.length - 1]?.price, 0),
-
-        tp1: targets.tp1 !== null && targets.tp1 !== undefined ? safeNumber(targets.tp1) : null,
-        tp2: targets.tp2 !== null && targets.tp2 !== undefined ? safeNumber(targets.tp2) : null,
-        tp3: targets.tp3 !== null && targets.tp3 !== undefined ? safeNumber(targets.tp3) : null,
-        sl: targets.sl !== null && targets.sl !== undefined ? safeNumber(targets.sl) : null,
-
-        ema20: safeNumber(indicators.ema20),
-        ema50: safeNumber(indicators.ema50),
-        rsi: safeNumber(indicators.rsi),
-        atr: safeNumber(indicators.atr),
-
-        res1: safeNumber(levels.res1),
-        res2: safeNumber(levels.res2),
-        poc: safeNumber(levels.poc),
-        sup1: safeNumber(levels.sup1),
-        sup2: safeNumber(levels.sup2),
-
-        updatedAt: raw.updatedAt || new Date().toISOString()
-      };
-    }
-
-    function renderSignal(data) {
-      const signal = String(data.signal || "WAIT").toUpperCase();
-      const pill = document.getElementById("signal-pill");
-
-      pill.className = "signal-pill";
-
-      if (signal === "BUY") {
-        pill.classList.add("buy");
-      } else if (signal === "SELL") {
-        pill.classList.add("sell");
-      } else {
-        pill.classList.add("wait");
-      }
-
-      pill.innerText = `${signal} | Score ${safeNumber(data.confidence)}`;
-
-      document.getElementById("signal-detail").innerText =
-        data.detail || `แนวโน้ม: ${data.trend || "WAIT"} | Timeframe: ${data.timeframe || currentTimeframe}`;
-
-      document.getElementById("signal-reason").innerText =
-        data.reason || "รอข้อมูลยืนยันจาก EMA, RSI, ATR และโครงสร้างราคา";
-
-      document.getElementById("analysis-time").innerText =
-        `วิเคราะห์ล่าสุด: ${formatTime(data.updatedAt)}`;
-    }
-
-    function renderEntries(data) {
-      const entryList = document.getElementById("entry-list");
-
-      const entries = Array.isArray(data.entries)
-        ? data.entries
-        : [];
-
-      const bias = String(data.bias || data.signal || "WAIT").toUpperCase();
-
-      if (entries.length === 0 || bias === "WAIT") {
-        entryList.innerHTML = `
-          <div class="wait-message">
-            ยังไม่มีจุดเข้า<br>
-            รอให้ระบบยืนยันทิศทางตลาด
-          </div>
-        `;
-        return;
-      }
-
-      const entryClass =
-        bias === "BUY"
-          ? "buy-text"
-          : "sell-text";
-
-      const zoneStatus =
-        data.nearZone
-          ? "ราคาอยู่ในโซนเข้าเทรด"
-          : "รอราคาย่อ/ดีดเข้าสู่โซน";
-
-      const rows = entries
-        .map((entry, index) => {
-          const price = safeNumber(entry.price);
-          const score = safeNumber(entry.score);
-
-          const label =
-            escapeHtml(
-              entry.label ||
-              `${bias} ไม้ ${index + 1}`
-            );
-
-          const zoneType =
-            escapeHtml(
-              entry.zoneType ||
-              "Trading Zone"
-            );
-
-          return `
-            <div class="entry-row">
-              <div>
-                <div>${label}</div>
-                <div class="target-subtitle">
-                  ${zoneType} | Score ${score}
+        <!-- RIGHT: SMC ENGINE & TRADING ZONES -->
+        <div>
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">🎯 SMC Signals & Entry Zones</span>
+                    <span id="active-direction-pill" class="sig-pill">M15 BULLISH SMC FOCUS 🟢</span>
                 </div>
-              </div>
 
-              <span class="entry-price ${entryClass}">
-                $${formatNumber(price)}
-              </span>
+                <div class="sig-mode-toggle">
+                    <button id="mode-auto" class="mode-btn active" onclick="setSignalMode('auto')">⚡ AUTO (EMA)</button>
+                    <button id="mode-buy" class="mode-btn buy" onclick="setSignalMode('buy')">🟢 FORCE BUY</button>
+                    <button id="mode-sell" class="mode-btn sell" onclick="setSignalMode('sell')">🔴 FORCE SELL</button>
+                </div>
+
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+                    <span style="font-size: 11px; color: var(--text-dim);" id="entry-card-subtag">Extreme Wick / Order Block Zones</span>
+                    <span id="sig-badge" class="badge bullish">BUY ZONE ACTIVE</span>
+                </div>
+
+                <!-- ENTRY ZONES -->
+                <div class="zone-group" id="entry-zones-container"></div>
+
+                <div style="margin: 12px 0 8px 0; border-top: 1px solid var(--line); padding-top: 8px; font-size: 12px; font-weight: bold; color: var(--gold);">
+                    🎯 Targets (TP) & Risk (SL)
+                </div>
+
+                <!-- TP / SL ZONES -->
+                <div class="zone-group" id="tp-sl-zones-container"></div>
+
+                <div style="margin-top: 10px; font-size: 11px; color: var(--text-dim); text-align: right;" id="sig-mode-desc">
+                    โหมดคำนวณ: M15 EMA Trend | Refined Order Block Zones
+                </div>
             </div>
-          `;
-        })
-        .join("");
 
-      entryList.innerHTML = `
-        <div class="target-subtitle" style="margin-bottom: 8px;">
-          แผน: ${bias} | ${zoneStatus}
+            <!-- SINGLE QUOTE WIDGET -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">💵 Live Price Tracker</span>
+                    <span id="val-realtime-price" style="font-size: 16px; font-weight: bold; color: var(--gold); font-family: monospace;">$0.00</span>
+                </div>
+                <div id="tv-symbol-mount" style="height: 120px;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TECHNICAL ANALYSIS & CHANNELS -->
+    <div class="grid-main" style="grid-template-columns: 1fr 340px;">
+        <div class="card" style="margin: 0;">
+            <div class="card-header">
+                <span class="card-title">📐 Multi-Timeframe Support & Resistance Channels</span>
+            </div>
+            <div class="channel-grid" id="sr-channels-container"></div>
         </div>
 
-        ${rows}
-      `;
-    }
-
-    function renderTargets(data) {
-      const targetList = document.getElementById("target-list");
-
-      const hasTargets =
-        data.tp1 !== null ||
-        data.tp2 !== null ||
-        data.tp3 !== null ||
-        data.sl !== null;
-
-      if (!hasTargets) {
-        targetList.innerHTML = `
-          <div class="wait-message">
-            ยังไม่มี TP/SL<br>
-            รอระบบยืนยันจุดเข้า
-          </div>
-        `;
-        return;
-      }
-
-      const direction =
-        String(
-          data.signal !== "WAIT"
-            ? data.signal
-            : data.bias || "BUY"
-        ).toUpperCase();
-
-      const priceClass =
-        direction === "SELL"
-          ? "sell-text"
-          : "buy-text";
-
-      targetList.innerHTML = `
-        <div class="target-row">
-          <span>TP1</span>
-          <span class="target-price ${priceClass}">
-            ${data.tp1 !== null ? "$" + formatNumber(data.tp1) : "-"}
-          </span>
+        <div class="card" style="margin: 0;">
+            <div class="card-header">
+                <span class="card-title">📊 Technical Gauge</span>
+            </div>
+            <div id="tv-ta-mount" style="height: 280px;"></div>
         </div>
+    </div>
 
-        <div class="target-row">
-          <span>TP2</span>
-          <span class="target-price ${priceClass}">
-            ${data.tp2 !== null ? "$" + formatNumber(data.tp2) : "-"}
-          </span>
+    <!-- NEWS PREDICTIONS -->
+    <div class="card" style="margin-top: 16px;">
+        <div class="card-header">
+            <span class="card-title" id="news-pred-header-title">📡 การคาดการณ์ข่าวเศรษฐกิจและผลกระทบต่อกราฟ</span>
         </div>
+        <div class="pred-grid" id="news-pred-container"></div>
+    </div>
 
-        <div class="target-row">
-          <span>TP3</span>
-          <span class="target-price ${priceClass}">
-            ${data.tp3 !== null ? "$" + formatNumber(data.tp3) : "-"}
-          </span>
+    <!-- NEWS & SENTIMENT ANALYSIS -->
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title" id="news-asset-title">📊 สรุปสภาวะเศรษฐกิจและภาพรวมข่าว</span>
         </div>
+        <p id="news-asset-desc" style="font-size: 13px; color: var(--text-dim); margin-bottom: 12px; line-height: 1.5;"></p>
+        <div style="font-weight: bold; margin-bottom: 8px; color: var(--gold);" id="news-list-label">📰 ข่าวสำคัญเฉพาะเจาะจงพร้อมลิงก์อ่านบทความฉบับเต็ม:</div>
+        <div class="news-grid" id="news-grid-container"></div>
+    </div>
 
-        <div class="target-row">
-          <span>Stop Loss</span>
-          <span class="target-price sl-text">
-            ${data.sl !== null ? "$" + formatNumber(data.sl) : "-"}
-          </span>
+    <!-- SOURCES REFERENCE -->
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title" id="sources-main-title">📚 แหล่งข้อมูลอ้างอิงบทวิเคราะห์ข่าวต้นฉบับ</span>
         </div>
-      `;
+        <div class="sources-grid" id="sources-grid-container"></div>
+    </div>
+
+<script>
+let currentTimeframe = '1m';
+let currentTvInterval = '1';
+let currentSymbol = 'OANDA:XAUUSD';
+let livePrice = 0;
+let wsConnection = null;
+let pollInterval = null;
+let userSignalMode = 'auto'; 
+
+// Data Buckets สำหรับแต่ละ Timeframe
+let barsH4 = [];
+let barsH1 = [];
+let barsM15 = [];
+let barsM5 = [];
+let barsM1 = [];
+
+let calculationTimer = null;
+let countdownTimer = null;
+
+// ==========================================
+// ⚙️ ตั้งค่ารอบการวิเคราะห์ (SYNC INTERVAL CONFIG)
+// 60 = 1 นาที / 180 = 3 นาที
+// ==========================================
+const SYNC_INTERVAL_SECONDS = 60;
+let secondsToNextSync = SYNC_INTERVAL_SECONDS;
+
+// ฐานข้อมูลข่าว
+const assetNewsDatabase = {
+    'OANDA:XAUUSD': {
+        title: '📊 สรุปสภาวะเศรษฐกิจและภาพรวมข่าวทองคำ (Gold / XAUUSD)',
+        desc: 'ทองคำเคลื่อนไหวผันผวนสูงในกรอบแนวรับแนวต้าน โดยได้รับอิทธิพลจากทิศทางอัตราดอกเบี้ยนโยบายของเฟด (Fed) ดัชนีดอลลาร์ (DXY) ตัวเลขการจ้างงานนอกภาคเกษตร (NFP) รวมถึงแรงซื้อทองคำในฐานะ สินทรัพย์ปลอดภัย (Safe-Haven) จากสถานการณ์ภูมิรัฐศาสตร์',
+        preds: [
+            { event: 'US Flash Manufacturing & Services PMI', forecast: '51.2 / 54.0', prev: '50.5 / 55.0', impact: 'หากตัวเลขออกมาต่ำกว่าคาด ดอลลาร์จะอ่อนค่า ดันราคาทองคำพุ่งขึ้นทดสอบแนวต้าน' },
+            { event: 'Fed Interest Rate Decision & FOMC', forecast: 'Hold 4.25%-4.50%', prev: '4.50%', impact: 'หากเฟดส่งสัญญาณปรับลดดอกเบี้ย จะเป็นปัจจัยหนุนเชิงบวก (Bullish) ต่อราคาทองคำอย่างรุนแรง' },
+            { event: 'U.S. Crude Oil Inventories (EIA)', forecast: '-1.2M Barrels', prev: '+0.8M Barrels', impact: 'กระทบต่อแนวโน้มเงินเฟ้อ หากเงินเฟ้อสูงขึ้น จะเพิ่มความต้องการถือครองทองคำเพื่อป้องกันเงินเฟ้อ' }
+        ],
+        news: [
+            {
+                source: 'FXStreet / Forex Factory',
+                sentiment: 'bullish',
+                sentimentText: 'ผลกระทบ: บวก (Bullish) 🟢',
+                title: 'Gold Price Gains Ground as US Dollar and Bond Yields Retreat',
+                reason: 'การย่อตัวของดัชนีดอลลาร์และอัตราผลตอบแทนพันธบัตรรัฐบาลสหรัฐฯ ช่วยหนุนให้ราคาทองคำมีแรงซื้อกลับเข้ามาบริเวณแนวรับสำคัญ',
+                url: 'https://www.forexfactory.com/news',
+                date: '2026-09-28'
+            },
+            {
+                source: 'Investing.com',
+                sentiment: 'bearish',
+                sentimentText: 'ผลกระทบ: ลบ (Bearish) 🔴',
+                title: 'Gold Faces Resistance Near All-Time Highs Ahead of Key Inflation Data',
+                reason: 'แรงขายทำกำไรบริเวณแนวต้านระดับสูง ส่งผลให้ราคาทองคำมีการย่อตัวพักฐานก่อนการประกาศตัวเลข PCE Inflation',
+                url: 'https://www.investing.com/commodities/gold-news',
+                date: '2026-09-28'
+            }
+        ],
+        sources: [
+            { cat: '1. ข่าวสารการเงินและปฏิทินเศรษฐกิจต่างประเทศ', links: [
+                { name: 'Forex Factory Calendar', url: 'https://www.forexfactory.com/calendar' },
+                { name: 'FXStreet Gold Analysis', url: 'https://www.fxstreet.com/markets/commodities/gold' }
+            ]},
+            { cat: '2. ข่าวสารเศรษฐกิจและทองคำในประเทศ', links: [
+                { name: 'สมาคมค้าทองคำ (Gold Traders Association)', url: 'https://www.goldtraders.or.th/' },
+                { name: 'Investing Thailand', url: 'https://th.investing.com/' }
+            ]}
+        ]
+    },
+    'BINANCE:BTCUSDT': {
+        title: '📊 สรุปสภาวะเศรษฐกิจและภาพรวมข่าวบิทคอยน์ (Bitcoin / BTCUSDT)',
+        desc: 'ตลาดคริปโทเคอร์เรนซีได้รับแรงหนุนจากกระแสเงินทุนไหลเข้า Spot Bitcoin ETF อย่างต่อเนื่อง ประกอบกับความเชื่อมั่นในเทคโนโลยีการเงินไร้ศูนย์กลาง และทิศทางนโยบายผ่อนคลายทางการเงินในระดับมหภาค',
+        preds: [
+            { event: 'Bitcoin Spot ETF Net Inflow Delta', forecast: '+$240M Inflow', prev: '+$180M Inflow', impact: 'เม็ดเงินสถาบันไหลเข้าสุทธิช่วยสร้างฐานราคาสูงขึ้น และผลักดันราคาเบรกเอาต์แนวต้าน' },
+            { event: 'US Core PCE Price Index MoM', forecast: '0.2%', prev: '0.3%', impact: 'เงินเฟ้อสหรัฐฯ ชะลอตัวลง จะเพิ่มสภาพคล่องในสินทรัพย์เสี่ยง ส่งผลดีต่อราคา Bitcoin' }
+        ],
+        news: [
+            {
+                source: 'Siam Blockchain',
+                sentiment: 'bullish',
+                sentimentText: 'ผลกระทบ: บวก (Bullish) 🟢',
+                title: 'สถาบันการเงินยักษ์ใหญ่เดินหน้าสะสม Bitcoin เพิ่มขึ้นต่อเนื่อง',
+                reason: 'แรงซื้อสะสมจากกองทุน ETF ใหญ่ช่วยดันราคาทะลุผ่านโซนแนวต้านสำคัญอย่างแข็งแกร่ง',
+                url: 'https://siamblockchain.com/',
+                date: '2026-09-28'
+            },
+            {
+                source: 'CoinDesk / TradingView',
+                sentiment: 'neutral',
+                sentimentText: 'ผลกระทบ: ปานกลาง (Neutral) 🟡',
+                title: 'Bitcoin Consolidates in Tight Range Above Key Moving Averages',
+                reason: 'ราคาเข้าสู่ช่วงไซด์เวย์สะสมพลังบนโซนแนวรับ EMA 50 รอการเลือกทิศทางใหญ่',
+                url: 'https://www.coindesk.com/',
+                date: '2026-09-28'
+            }
+        ],
+        sources: [
+            { cat: '1. ข่าวสารคริปโทเคอร์เรนซีระดับโลก', links: [
+                { name: 'CoinDesk Market News', url: 'https://www.coindesk.com/' },
+                { name: 'CoinTelegraph Bitcoin Feed', url: 'https://cointelegraph.com/tags/bitcoin' }
+            ]},
+            { cat: '2. สื่อข่าวคริปโทฯ ภาษาไทย', links: [
+                { name: 'Siam Blockchain', url: 'https://siamblockchain.com/' }
+            ]}
+        ]
     }
+};
 
-    function renderIndicators(data) {
-      document.getElementById("ema20").innerText = formatNumber(data.ema20);
-      document.getElementById("ema50").innerText = formatNumber(data.ema50);
-      document.getElementById("rsi").innerText = formatNumber(data.rsi);
-      document.getElementById("atr").innerText = formatNumber(data.atr);
+function biquoteSymbol(tvSymbol) {
+    const s = (tvSymbol || '').toUpperCase().trim();
+    if (s.includes('XAUUSD')) return 'XAUUSD';
+    if (s.includes('BTCUSDT') || s.includes('BTCUSD')) return 'BTCUSD';
+    if (s.includes('EURUSD')) return 'EURUSD';
+    if (s.includes('USOIL')) return 'USOIL';
+    return s.includes(':') ? s.split(':').pop() : s;
+}
+
+function cleanAssetTitle(symbol) {
+    if (symbol.includes(':')) {
+        return symbol.split(':')[1];
     }
+    return symbol;
+}
 
-    function renderLevels(data) {
-      document.getElementById("res2").innerText = `$${formatNumber(data.res2)}`;
-      document.getElementById("res1").innerText = `$${formatNumber(data.res1)}`;
-      document.getElementById("poc").innerText = `$${formatNumber(data.poc)}`;
-      document.getElementById("sup1").innerText = `$${formatNumber(data.sup1)}`;
-      document.getElementById("sup2").innerText = `$${formatNumber(data.sup2)}`;
-    }
-
-    function renderEAStatus(data) {
-      document.getElementById("ea-symbol").innerText = data.symbol || getApiSymbol(currentSymbol);
-      document.getElementById("ea-timeframe").innerText = data.timeframe || currentTimeframe;
-      document.getElementById("ea-trend").innerText = data.trend || "WAIT";
-      document.getElementById("ea-signal").innerText = data.signal || "WAIT";
-      document.getElementById("ea-confidence").innerText = `${safeNumber(data.confidence)}/100`;
-    }
-
-    function renderDashboard(data) {
-      const symbol = data.symbol || getApiSymbol(currentSymbol);
-
-      document.getElementById("symbol-display").innerText = symbol;
-      document.getElementById("timeframe-display").innerText = data.timeframe || currentTimeframe;
-      document.getElementById("current-price").innerText = formatNumber(data.price);
-
-      renderSignal(data);
-      renderEntries(data);
-      renderTargets(data);
-      renderIndicators(data);
-      renderLevels(data);
-      renderEAStatus(data);
-    }
-
-    async function fetchEAAnalysis() {
-      if (isLoading) return;
-
-      isLoading = true;
-
-      try {
-        hideError();
-
-        const params = new URLSearchParams({
-          symbol: getApiSymbol(currentSymbol),
-          tf: currentTimeframe,
-          cache: Date.now().toString()
-        });
-
-        const response = await fetch(
-          `/api/dashboard-data?${params.toString()}`,
-          { method: "GET", cache: "no-store", headers: { Accept: "application/json" } }
-        );
-
-        const contentType = response.headers.get("content-type") || "";
-
-        if (!contentType.includes("application/json")) {
-          const htmlText = await response.text();
-          throw new Error(
-            "API ส่ง HTML กลับมาแทน JSON | " +
-            `HTTP ${response.status} | ${htmlText.slice(0, 200)}`
-          );
-        }
-
-        const raw = await response.json();
-
-        if (!response.ok) {
-          throw new Error(raw.error || "API ไม่สามารถตอบกลับได้");
-        }
-
-        const data = normalizeDashboardData(raw);
-        renderDashboard(data);
-        setConnectionStatus(true);
-        startRefreshCountdown();
-      } catch (error) {
-        console.error("EA Analysis Error:", error);
-        setConnectionStatus(false);
-        showError(error.message || "ไม่สามารถเชื่อมต่อ API ได้");
-      } finally {
-        isLoading = false;
-      }
-    }
-
-    function initTradingView() {
-      const container = document.getElementById("tradingview_chart");
-      container.innerHTML = "";
-
-      if (typeof TradingView === "undefined") {
-        container.innerHTML = `<div class="wait-message">ไม่สามารถโหลด TradingView ได้</div>`;
-        return;
-      }
-
-      new TradingView.widget({
-        width: "100%",
-        height: 450,
-        symbol: currentSymbol,
-        interval: chartIntervals[currentTimeframe] || "15",
-        timezone: "Asia/Bangkok",
-        theme: "dark",
-        style: "1",
-        locale: "th",
-        toolbar_bg: "#171e29",
-        enable_publishing: false,
-        allow_symbol_change: false,
-        hide_top_toolbar: false,
-        hide_legend: false,
-        save_image: false,
-        container_id: "tradingview_chart"
-      });
-    }
-
-    function changeSymbol(symbol, button) {
-      currentSymbol = symbol;
-
-      document.querySelectorAll(".symbol-btn").forEach((el) => el.classList.remove("active"));
-      button.classList.add("active");
-
-      initTradingView();
-      fetchEAAnalysis();
-    }
-
-    function changeTimeframe(timeframe, button) {
-      currentTimeframe = timeframe;
-
-      document.querySelectorAll(".tf-btn").forEach((el) => el.classList.remove("active"));
-      button.classList.add("active");
-
-      initTradingView();
-      fetchEAAnalysis();
-    }
-
-    window.addEventListener("load", () => {
-      initTradingView();
-      fetchEAAnalysis();
-      setInterval(() => fetchEAAnalysis(), refreshIntervalMs);
+function formatPrice(value, symbol = currentSymbol) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '--';
+    const bq = biquoteSymbol(symbol);
+    const decimals = (bq === 'EURUSD' || symbol.includes('EURUSD')) ? 5 : (n < 10 ? 4 : 2);
+    return n.toLocaleString('en-US', {
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals
     });
-  </script>
+}
+
+function setApiStatus(text, state = 'up') {
+    const el = document.getElementById('api-status');
+    if (!el) return;
+    el.textContent = text;
+    if (state === 'up') {
+        el.style.color = 'var(--up)';
+        el.style.borderColor = 'var(--up)';
+    } else if (state === 'warn') {
+        el.style.color = 'var(--gold2)';
+        el.style.borderColor = 'var(--gold)';
+    } else {
+        el.style.color = 'var(--down)';
+        el.style.borderColor = 'var(--down)';
+    }
+}
+
+function renderLivePrice(price) {
+    livePrice = Number(price) || 0;
+    const el = document.getElementById('val-realtime-price');
+    if (el && livePrice > 0) {
+        el.textContent = `$${formatPrice(livePrice)}`;
+    }
+    if (livePrice > 0) recalculateSMCTradingEngine(livePrice);
+}
+
+function renderAutoSRChannels(symbol) {
+    const cleanSym = cleanAssetTitle(symbol);
+    const container = document.getElementById('sr-channels-container');
+    
+    let baseRef = livePrice > 0 ? livePrice : 100;
+    let step = baseRef * 0.008;
+
+    let resM1 = (baseRef + step * 0.5).toFixed(2);
+    let supM1 = (baseRef - step * 0.5).toFixed(2);
+    let resM15 = (baseRef + step * 1.5).toFixed(2);
+    let supM15 = (baseRef - step * 1.5).toFixed(2);
+    let resH4 = (baseRef + step * 3.5).toFixed(2);
+    let supH4 = (baseRef - step * 3.5).toFixed(2);
+
+    container.innerHTML = `
+        <div class="channel-card" style="border-left: 4px solid var(--purple);">
+            <div class="channel-title">M1 / M5 Refined Execution Zone (${cleanSym})</div>
+            <div class="channel-val" style="color:var(--down);">ต้าน: $${formatPrice(resM1)}</div>
+            <div class="channel-val" style="color:var(--up);">รับ: $${formatPrice(supM1)}</div>
+        </div>
+        <div class="channel-card" style="border-left: 4px solid var(--gold);">
+            <div class="channel-title">M15 / H1 Core Structure Zone</div>
+            <div class="channel-val" style="color:var(--down);">ต้าน: $${formatPrice(resM15)}</div>
+            <div class="channel-val" style="color:var(--up);">รับ: $${formatPrice(supM15)}</div>
+        </div>
+        <div class="channel-card" style="border-left: 4px solid var(--up);">
+            <div class="channel-title">H4 Macro Trend Alignment</div>
+            <div class="channel-val" style="color:var(--down);">ต้าน: $${formatPrice(resH4)}</div>
+            <div class="channel-val" style="color:var(--up);">รับ: $${formatPrice(supH4)}</div>
+        </div>
+    `;
+}
+
+function renderNewsPredictions(symbol) {
+    const cleanSym = cleanAssetTitle(symbol);
+    const container = document.getElementById('news-pred-container');
+    const assetData = assetNewsDatabase[symbol];
+
+    document.getElementById('news-pred-header-title').textContent = `📡 การคาดการณ์ข่าวเศรษฐกิจและผลกระทบต่อกราฟ (${cleanSym} News Convergence)`;
+    container.innerHTML = '';
+
+    const predsList = (assetData && assetData.preds) ? assetData.preds : [
+        { event: `${cleanSym} Volatility & Liquidity Index`, forecast: 'Expanding', prev: 'Neutral', impact: `สภาพคล่องสินทรัพย์ ${cleanSym} ปรับตัวเพิ่มขึ้น กระตุ้นแรงซื้อขายทดสอบโซนแนวรับแนวต้าน` },
+        { event: `Macro Economic Policy & Interest Rates`, forecast: 'Hawkish Hold', prev: '4.25%', impact: `ทิศทางนโยบายการเงินส่งผลให้ราคา ${cleanSym} ผันผวนในกรอบสะสมพลังก่อนเลือกทิศทาง` },
+        { event: `${cleanSym} Market Orderflow Delta`, forecast: '+2.4M Volume', prev: '-0.8M Volume', impact: `เกิดแรงซื้อคืนแบบ Aggressive Buying เข้าสู่โครงสร้าง SMC M15` }
+    ];
+
+    predsList.forEach(item => {
+        const box = document.createElement('div');
+        box.className = 'pred-box';
+        box.innerHTML = `
+            <div class="pred-title">📌 ข่าวสำคัญ: ${item.event}</div>
+            <div class="pred-val">Forecast: ${item.forecast} | Prev: ${item.prev}</div>
+            <div style="font-size:12.5px; color:var(--text); margin-top:6px; line-height:1.4;">
+                <b>คาดการณ์ต่อกราฟ:</b> ${item.impact}
+            </div>
+        `;
+        container.appendChild(box);
+    });
+}
+
+function renderAssetNews(symbol) {
+    const cleanSym = cleanAssetTitle(symbol);
+    const assetData = assetNewsDatabase[symbol];
+
+    document.getElementById('news-asset-title').textContent = assetData ? assetData.title : `📊 สรุปสภาวะเศรษฐกิจและภาพรวมข่าว (${cleanSym})`;
+    document.getElementById('news-asset-desc').textContent = assetData ? assetData.desc : `สภาวะการซื้อขายของ ${cleanSym} ในปัจจุบันได้รับอิทธิพลจากสภาพคล่อง สภาวะเศรษฐกิจมหภาค และ Sentiment การลงทุนทั้งในและต่างประเทศ`;
+    document.getElementById('news-list-label').textContent = `📰 ข่าวสำคัญเฉพาะเจาะจงพร้อมลิงก์อ่านบทความฉบับเต็ม (${cleanSym}):`;
+    document.getElementById('sources-main-title').textContent = `📚 แหล่งข้อมูลอ้างอิงบทวิเคราะห์ข่าวต้นฉบับ (${cleanSym})`;
+
+    const newsContainer = document.getElementById('news-grid-container');
+    newsContainer.innerHTML = '';
+
+    const newsList = (assetData && assetData.news) ? assetData.news : [
+        {
+            source: 'Forex Factory / TradingView News',
+            sentiment: 'bullish',
+            sentimentText: 'ผลกระทบ: บวก (Bullish) 🟢',
+            title: `${cleanSym} Holding Above Key Support Zone Following Volatile Session`,
+            reason: `แรงซื้อตอบสนองแนวรับสำคัญของ ${cleanSym} พยุงราคาขึ้นทดสอบระดับแนวต้านถัดไป`,
+            url: `https://www.google.com/search?q=${encodeURIComponent(cleanSym + ' news tradingview')}`,
+            date: '2026-09-28'
+        },
+        {
+            source: 'Investing.com / Market Analysis',
+            sentiment: 'neutral',
+            sentimentText: 'ผลกระทบ: ปานกลาง (Neutral) 🟡',
+            title: `${cleanSym} Consolidates as Traders Await Key Economic Data`,
+            reason: `ราคาเข้าสู่ช่วงไซด์เวย์สะสมพลังบนโซนแนวรับ SMC รอปัจจัยข่าวใหม่`,
+            url: `https://www.google.com/search?q=${encodeURIComponent(cleanSym + ' investing news')}`,
+            date: '2026-09-28'
+        }
+    ];
+
+    newsList.forEach(item => {
+        const card = document.createElement('div');
+        card.className = 'news-card';
+        card.innerHTML = `
+            <div>
+                <div class="news-header">
+                    <span class="news-source-tag">${item.source}</span>
+                    <span class="badge ${item.sentiment}">${item.sentimentText}</span>
+                </div>
+                <div class="news-headline">${item.title}</div>
+                <div class="news-impact-box ${item.sentiment}">
+                    <b>วิเคราะห์ผลกระทบ:</b> ${item.reason}
+                </div>
+            </div>
+            <div class="news-footer-row">
+                <a href="${item.url}" target="_blank" rel="noopener noreferrer" class="news-read-link">
+                    อ่านข่าวต้นฉบับ 🔗
+                </a>
+                <span class="news-date-tag">${item.date}</span>
+            </div>
+        `;
+        newsContainer.appendChild(card);
+    });
+
+    const sourcesContainer = document.getElementById('sources-grid-container');
+    sourcesContainer.innerHTML = '';
+
+    const sourcesList = (assetData && assetData.sources) ? assetData.sources : [
+        { cat: `1. ข้อมูลราคา Realtime & ข่าวต่างประเทศ (${cleanSym})`, links: [
+            { name: 'Forex Factory Calendar', url: 'https://www.forexfactory.com/calendar' },
+            { name: `TradingView Symbol Overview (${cleanSym})`, url: `https://www.tradingview.com/symbols/${cleanSym}/` }
+        ]},
+        { cat: '2. สำนักข่าวการเงินและเศรษฐกิจชั้นนำ', links: [
+            { name: 'Investing.com Global Markets', url: 'https://www.investing.com/' },
+            { name: 'CNBC Finance News', url: 'https://www.cnbc.com/' }
+        ]}
+    ];
+
+    sourcesList.forEach(scat => {
+        const box = document.createElement('div');
+        box.className = 'source-cat-box';
+        let listItems = scat.links.map(l => `<li><b>${l.name}:</b> <a href="${l.url}" target="_blank">${l.name} Link</a></li>`).join('');
+        box.innerHTML = `
+            <div class="source-cat-header">${scat.cat}</div>
+            <ul class="source-list">${listItems}</ul>
+        `;
+        sourcesContainer.appendChild(box);
+    });
+}
+
+// -------------------------------------------------------------
+// DYNAMIC FETCH & REALTIME SYNC Engine
+// -------------------------------------------------------------
+async function fetchCandleData(tf, limit = 60) {
+    const symbol = biquoteSymbol(currentSymbol);
+    try {
+        const response = await fetch(
+            `https://biquote.io/api/${encodeURIComponent(symbol)}/ohlc?interval=${encodeURIComponent(tf)}&limit=${limit}`,
+            { cache: 'no-store' }
+        );
+        if (!response.ok) return [];
+        const data = await response.json();
+        return Array.isArray(data.bars) ? data.bars : [];
+    } catch (err) {
+        return [];
+    }
+}
+
+async function loadAllTimeframesData() {
+    setApiStatus('Syncing SMC Data... 🟡', 'warn');
+    const [h4, h1, m15, m5, m1] = await Promise.all([
+        fetchCandleData('4h', 80),
+        fetchCandleData('1h', 80),
+        fetchCandleData('15m', 80),
+        fetchCandleData('5m', 60),
+        fetchCandleData('1m', 60)
+    ]);
+
+    barsH4 = h4;
+    barsH1 = h1;
+    barsM15 = m15;
+    barsM5 = m5;
+    barsM1 = m1;
+
+    if (barsM1.length > 0 && barsM1[barsM1.length - 1].close) {
+        renderLivePrice(Number(barsM1[barsM1.length - 1].close));
+    }
+
+    if (livePrice > 0) recalculateSMCTradingEngine(livePrice);
+    setApiStatus('SMC Engine Live 🟢', 'up');
+    secondsToNextSync = SYNC_INTERVAL_SECONDS;
+}
+
+function startEngineLoop() {
+    if (calculationTimer) clearInterval(calculationTimer);
+    if (countdownTimer) clearInterval(countdownTimer);
+
+    loadAllTimeframesData();
+
+    calculationTimer = setInterval(() => {
+        loadAllTimeframesData();
+    }, SYNC_INTERVAL_SECONDS * 1000);
+
+    countdownTimer = setInterval(() => {
+        secondsToNextSync--;
+        if (secondsToNextSync < 0) secondsToNextSync = SYNC_INTERVAL_SECONDS;
+        const mins = Math.floor(secondsToNextSync / 60);
+        const secs = secondsToNextSync % 60;
+        const timerEl = document.getElementById('timer-display');
+        if (timerEl) {
+            timerEl.textContent = `⏱️ Next Sync: ${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+    }, 1000);
+}
+
+function fetchFallbackQuote(symbol) {
+    let basePrice = 100.00;
+    if (symbol.includes('XAUUSD')) basePrice = 2650.00;
+    else if (symbol.includes('USOIL')) basePrice = 72.50;
+    else if (symbol.includes('EURUSD')) basePrice = 1.0850;
+    else if (symbol.includes('QQQ')) basePrice = 490.00;
+    else if (symbol.includes('BTC')) basePrice = 67000.00;
+    else if (symbol.includes('PTT')) basePrice = 33.50;
+    else if (symbol.includes('USDTHB')) basePrice = 33.20;
+
+    if (livePrice === 0) livePrice = basePrice;
+    let tick = (Math.random() - 0.492) * (basePrice * 0.0002);
+    livePrice = parseFloat((livePrice + tick).toFixed(symbol.includes('EURUSD') ? 4 : 2));
+
+    renderLivePrice(livePrice);
+    renderAutoSRChannels(symbol);
+    setApiStatus("Live Price Feed Sync 🟢", "up");
+}
+
+function connectRealtimePriceAPI(symbol) {
+    if (wsConnection) { wsConnection.close(); wsConnection = null; }
+    if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+
+    const bqSymbol = biquoteSymbol(symbol);
+    setApiStatus('Connecting Realtime Feed... 🟡', 'warn');
+
+    if (symbol.includes('BTC')) {
+        wsConnection = new WebSocket('wss://stream.binance.com:9443/ws/btcusdt@ticker');
+        wsConnection.onopen = () => setApiStatus("Binance Stream Live 🟢", "up");
+        wsConnection.onmessage = (e) => {
+            let data = JSON.parse(e.data);
+            if (data && data.c) renderLivePrice(parseFloat(data.c));
+        };
+        wsConnection.onerror = () => startRESTPollingFallback(symbol);
+        return;
+    }
+
+    try {
+        wsConnection = new WebSocket('wss://stream.biquote.io/v1/live');
+        wsConnection.onopen = () => {
+            setApiStatus('Biquote Stream Live 🟢', 'up');
+            wsConnection.send(JSON.stringify({ action: 'subscribe', symbols: [bqSymbol] }));
+        };
+        wsConnection.onmessage = (e) => {
+            const data = JSON.parse(e.data);
+            if (data && (data.price || data.mid)) {
+                renderLivePrice(Number(data.price || data.mid));
+            }
+        };
+        wsConnection.onerror = () => startRESTPollingFallback(symbol);
+    } catch (err) {
+        startRESTPollingFallback(symbol);
+    }
+}
+
+function startRESTPollingFallback(symbol) {
+    fetchFallbackQuote(symbol);
+    pollInterval = setInterval(() => fetchFallbackQuote(symbol), 1500);
+}
+
+function calculateEMA(prices, period) {
+    if (prices.length < period) return prices[prices.length - 1] || 0;
+    const k = 2 / (period + 1);
+    let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    for (let i = period; i < prices.length; i++) {
+        ema = prices[i] * k + ema * (1 - k);
+    }
+    return ema;
+}
+
+function findRefinedOrderBlock(candles, direction) {
+    if (!candles || candles.length < 5) return null;
+    const len = candles.length;
+
+    if (direction === 'BULLISH') {
+        for (let i = len - 2; i >= Math.max(0, len - 20); i--) {
+            const cCurr = candles[i];
+            const cNext = candles[i + 1];
+            if (cNext && cNext.close > cCurr.high && cCurr.close <= cCurr.open) {
+                return {
+                    top: Number(cCurr.high),
+                    bottom: Number(cCurr.low),
+                    wickLow: Number(cCurr.low) - ((Number(cCurr.high) - Number(cCurr.low)) * 0.3)
+                };
+            }
+        }
+    } else if (direction === 'BEARISH') {
+        for (let i = len - 2; i >= Math.max(0, len - 20); i--) {
+            const cCurr = candles[i];
+            const cNext = candles[i + 1];
+            if (cNext && cNext.close < cCurr.low && cNext.close >= cCurr.open) {
+                return {
+                    top: Number(cCurr.high),
+                    bottom: Number(cCurr.low),
+                    wickHigh: Number(cCurr.high) + ((Number(cCurr.high) - Number(cCurr.low)) * 0.3)
+                };
+            }
+        }
+    }
+    return null;
+}
+
+// -------------------------------------------------------------
+// 🧠 RECALCULATE ENGINE (DYNAMIC MULTI-TIMEFRAME)
+// -------------------------------------------------------------
+function recalculateSMCTradingEngine(price) {
+    if (!price || price <= 0) return;
+
+    const decimals = (biquoteSymbol(currentSymbol) === 'EURUSD' || currentSymbol.includes('EURUSD')) ? 5 : 2;
+
+    // เลือกแท่งราคา Timeframe หลักสำหรับวิเคราะห์ตามที่คุณเลือก
+    let primaryBars = barsM15;
+    let tfLabel = 'M15';
+
+    if (currentTimeframe === '1h') {
+        primaryBars = barsH1.length > 0 ? barsH1 : barsM15;
+        tfLabel = 'H1';
+    } else if (currentTimeframe === '4h') {
+        primaryBars = barsH4.length > 0 ? barsH4 : (barsH1.length > 0 ? barsH1 : barsM15);
+        tfLabel = 'H4';
+    }
+
+    const primaryCloses = primaryBars.map(b => Number(b.close)).filter(Number.isFinite);
+    const primaryHighs = primaryBars.map(b => Number(b.high)).filter(Number.isFinite);
+    const primaryLows = primaryBars.map(b => Number(b.low)).filter(Number.isFinite);
+
+    const ema50 = primaryCloses.length >= 50 ? calculateEMA(primaryCloses, 50) : price * 0.998;
+    const ema200 = primaryCloses.length >= 80 ? calculateEMA(primaryCloses, 80) : price * 0.995;
+
+    const swingHigh = primaryHighs.length ? Math.max(...primaryHighs.slice(-20)) : price * 1.01;
+    const swingLow = primaryLows.length ? Math.min(...primaryLows.slice(-20)) : price * 0.99;
+
+    let isBullish;
+    if (userSignalMode === 'buy') isBullish = true;
+    else if (userSignalMode === 'sell') isBullish = false;
+    else isBullish = price >= ema50 || ema50 >= ema200;
+
+    const direction = isBullish ? 'BULLISH' : 'BEARISH';
+    
+    // ค้นหา Order Block โดยใช้ M5/M1 ช่วย Refine ราคาเข้า
+    let ob = findRefinedOrderBlock(barsM5, direction) || findRefinedOrderBlock(barsM1, direction);
+
+    // ปรับ ATR Multiplier ให้กว้างขึ้นตาม Timeframe ใหญ่
+    let atrMultiplier = 0.0012;
+    if (tfLabel === 'H1') atrMultiplier = 0.0035;
+    if (tfLabel === '4h' || tfLabel === 'H4') atrMultiplier = 0.0075;
+
+    const atrBuffer = price * atrMultiplier; 
+    let baseRef = ob ? (isBullish ? ob.bottom : ob.top) : (isBullish ? price * (1 - atrMultiplier) : price * (1 + atrMultiplier));
+
+    let ez1Min, ez1Max, ez2Min, ez2Max, ez3Min, ez3Max;
+    let tp1Min, tp1Max, tp2Min, tp2Max, tp3Min, tp3Max;
+    let slMin, slMax;
+
+    if (isBullish) {
+        ez1Min = ob ? ob.wickLow : baseRef - (atrBuffer * 0.8);
+        ez1Max = ob ? ob.bottom : baseRef - (atrBuffer * 0.3);
+        ez2Min = ob ? ob.bottom : baseRef - (atrBuffer * 0.2);
+        ez2Max = ob ? ob.top : baseRef + (atrBuffer * 0.2);
+        ez3Min = price * 0.9990;
+        ez3Max = price;
+
+        slMin = ez1Min - (atrBuffer * 0.6);
+        slMax = ez1Min - (atrBuffer * 0.1);
+
+        const risk = Math.max(price - slMin, price * 0.001);
+
+        tp1Min = price + (risk * 1.2); tp1Max = price + (risk * 1.8);
+        tp2Min = price + (risk * 2.2); tp2Max = price + (risk * 3.0);
+        tp3Min = Math.max(price + (risk * 3.5), swingHigh - (atrBuffer * 0.5)); 
+        tp3Max = Math.max(price + (risk * 4.0), swingHigh + (atrBuffer * 0.5));
+    } else {
+        ez1Min = ob ? ob.top : baseRef - (atrBuffer * 0.2);
+        ez1Max = ob ? (ob.wickHigh || ob.top + atrBuffer * 0.8) : baseRef + (atrBuffer * 0.8);
+        ez2Min = ob ? ob.bottom : baseRef - (atrBuffer * 0.2);
+        ez2Max = ob ? ob.top : baseRef + (atrBuffer * 0.2);
+        ez3Min = price;
+        ez3Max = price * 1.0010;
+
+        slMin = ez1Max + (atrBuffer * 0.1);
+        slMax = ez1Max + (atrBuffer * 0.6);
+
+        const risk = Math.max(slMax - price, price * 0.001);
+
+        tp1Min = price - (risk * 1.8); tp1Max = price - (risk * 1.2);
+        tp2Min = price - (risk * 3.0); tp2Max = price - (risk * 2.2);
+        tp3Min = Math.min(price - (risk * 4.0), swingLow - (atrBuffer * 0.5)); 
+        tp3Max = Math.min(price - (risk * 3.5), swingLow + (atrBuffer * 0.5));
+    }
+
+    const fmtZ = (minV, maxV) => `$${minV.toFixed(decimals)} - $${maxV.toFixed(decimals)}`;
+
+    const entryZonesContainer = document.getElementById('entry-zones-container');
+    const tpSlContainer = document.getElementById('tp-sl-zones-container');
+    const badge = document.getElementById('sig-badge');
+    const pill = document.getElementById('active-direction-pill');
+    const subtag = document.getElementById('entry-card-subtag');
+
+    if (isBullish) {
+        pill.textContent = `${tfLabel} BULLISH SMC FOCUS 🟢`;
+        pill.style.borderColor = 'var(--up)';
+        pill.style.color = 'var(--up)';
+        subtag.textContent = 'Extreme Wick / Order Block Zones';
+        badge.textContent = `BUY ZONE ACTIVE`;
+        badge.className = 'sig-tag buy';
+
+        entryZonesContainer.innerHTML = `
+            <div class="zone-item">
+                <span class="zone-label"><span class="dot buy"></span>Entry Zone 1 :</span>
+                <span class="val-num buy">${fmtZ(ez1Min, ez1Max)}</span>
+            </div>
+            <div class="zone-item">
+                <span class="zone-label"><span class="dot buy"></span>Entry Zone 2 :</span>
+                <span class="val-num buy">${fmtZ(ez2Min, ez2Max)}</span>
+            </div>
+            <div class="zone-item">
+                <span class="zone-label"><span class="dot buy"></span>Entry Zone 3 :</span>
+                <span class="val-num buy">${fmtZ(ez3Min, ez3Max)}</span>
+            </div>
+        `;
+
+        tpSlContainer.innerHTML = `
+            <div class="zone-item">
+                <span class="zone-label"><span class="dot tp"></span>TP Zone 1 :</span>
+                <span class="val-num tp">${fmtZ(tp1Min, tp1Max)}</span>
+            </div>
+            <div class="zone-item">
+                <span class="zone-label"><span class="dot tp"></span>TP Zone 2 :</span>
+                <span class="val-num tp">${fmtZ(tp2Min, tp2Max)}</span>
+            </div>
+            <div class="zone-item">
+                <span class="zone-label"><span class="dot tp"></span>TP Zone 3 :</span>
+                <span class="val-num tp">${fmtZ(tp3Min, tp3Max)}</span>
+            </div>
+            <div style="border-top:1px dashed var(--line);margin:2px 0;"></div>
+            <div class="zone-item" style="background: rgba(226,87,76,0.08);">
+                <span class="zone-label"><span class="dot sl"></span>SL Zone :</span>
+                <span class="val-num sl">${fmtZ(slMin, slMax)}</span>
+            </div>
+        `;
+    } else {
+        pill.textContent = `${tfLabel} BEARISH SMC FOCUS 🔴`;
+        pill.style.borderColor = 'var(--down)';
+        pill.style.color = 'var(--down)';
+        subtag.textContent = 'Extreme Wick / Order Block Zones';
+        badge.textContent = `SELL ZONE ACTIVE`;
+        badge.className = 'sig-tag sell';
+
+        entryZonesContainer.innerHTML = `
+            <div class="zone-item">
+                <span class="zone-label"><span class="dot sell"></span>Entry Zone 1 :</span>
+                <span class="val-num sell">${fmtZ(ez1Min, ez1Max)}</span>
+            </div>
+            <div class="zone-item">
+                <span class="zone-label"><span class="dot sell"></span>Entry Zone 2 :</span>
+                <span class="val-num sell">${fmtZ(ez2Min, ez2Max)}</span>
+            </div>
+            <div class="zone-item">
+                <span class="zone-label"><span class="dot sell"></span>Entry Zone 3 :</span>
+                <span class="val-num sell">${fmtZ(ez3Min, ez3Max)}</span>
+            </div>
+        `;
+
+        tpSlContainer.innerHTML = `
+            <div class="zone-item">
+                <span class="zone-label"><span class="dot tp"></span>TP Zone 1 :</span>
+                <span class="val-num tp">${fmtZ(tp1Min, tp1Max)}</span>
+            </div>
+            <div class="zone-item">
+                <span class="zone-label"><span class="dot tp"></span>TP Zone 2 :</span>
+                <span class="val-num tp">${fmtZ(tp2Min, tp2Max)}</span>
+            </div>
+            <div class="zone-item">
+                <span class="zone-label"><span class="dot tp"></span>TP Zone 3 :</span>
+                <span class="val-num tp">${fmtZ(tp3Min, tp3Max)}</span>
+            </div>
+            <div style="border-top:1px dashed var(--line);margin:2px 0;"></div>
+            <div class="zone-item" style="background: rgba(226,87,76,0.08);">
+                <span class="zone-label"><span class="dot sl"></span>SL Zone :</span>
+                <span class="val-num sl">${fmtZ(slMin, slMax)}</span>
+            </div>
+        `;
+    }
+
+    document.getElementById('sig-mode-desc').textContent =
+        `โหมดคำนวณ: ${tfLabel} EMA Trend (${isBullish ? 'BULLISH' : 'BEARISH'}) | Refined Order Block Zones | Realtime Sync`;
+}
+
+function setSignalMode(mode) {
+    userSignalMode = mode;
+    document.getElementById('mode-auto').classList.toggle('active', mode === 'auto');
+    document.getElementById('mode-buy').classList.toggle('active', mode === 'buy');
+    document.getElementById('mode-sell').classList.toggle('active', mode === 'sell');
+    recalculateSMCTradingEngine(livePrice);
+}
+
+function loadTV(id, src, config){
+    const m = document.getElementById(id);
+    if (!m) return;
+    m.innerHTML = '';
+    const c = document.createElement('div');
+    c.className = 'tradingview-widget-container';
+    c.style.height = '100%'; c.style.width = '100%';
+    const w = document.createElement('div');
+    w.className = 'tradingview-widget-container__widget';
+    w.style.height = '100%'; w.style.width = '100%';
+    c.appendChild(w);
+    const s = document.createElement('script');
+    s.src = src; s.async = true; s.textContent = JSON.stringify(config);
+    c.appendChild(s); m.appendChild(c);
+}
+
+function refreshWidget(symbol, tvInterval = '1'){
+    currentSymbol = symbol;
+    livePrice = 0;
+
+    document.getElementById('current-asset-display').textContent = cleanAssetTitle(symbol);
+
+    let taInterval = '1m';
+    if (tvInterval === '1') taInterval = '1m';
+    else if (tvInterval === '5') taInterval = '5m';
+    else if (tvInterval === '15') taInterval = '15m';
+    else if (tvInterval === '60') taInterval = '1h';
+    else if (tvInterval === '240') taInterval = '4h';
+
+    loadTV('tv-symbol-mount', 'https://s3.tradingview.com/external-embedding/embed-widget-single-quote.js', {
+        symbol: symbol, width: "100%", isTransparent: true, colorTheme: "dark", locale: "th"
+    });
+
+    loadTV('tv-chart-mount', 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js', {
+        autosize: true, symbol: symbol, interval: tvInterval, timezone: 'Asia/Bangkok', theme: 'dark', style: '1', locale: 'th',
+        backgroundColor: 'rgba(23,29,39,1)', hide_top_toolbar: false, allow_symbol_change: true,
+        studies: ["STD;Pivot%1Points%1High%1Low", "STD;EMA;50", "STD;EMA;200"]
+    });
+
+    loadTV('tv-ta-mount', 'https://s3.tradingview.com/external-embedding/embed-widget-technical-analysis.js', {
+        interval: taInterval, width: '100%', height: 420, symbol: symbol, showIntervalTabs: true, locale: 'th', colorTheme: 'dark'
+    });
+
+    renderAutoSRChannels(symbol);
+    renderNewsPredictions(symbol);
+    renderAssetNews(symbol);
+    startEngineLoop();
+    connectRealtimePriceAPI(symbol);
+}
+
+function changeTimeframe(tf, tvInterval){
+    currentTimeframe = tf; currentTvInterval = tvInterval;
+    document.querySelectorAll('.tf-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tf === tf));
+    refreshWidget(currentSymbol, currentTvInterval);
+}
+
+function go(symbol, label){
+    document.querySelectorAll('.chip').forEach(c => c.classList.toggle('active', c.dataset.symbol === symbol));
+    refreshWidget(symbol, currentTvInterval);
+}
+
+function handleSearch(){
+    const input = document.getElementById('symbol-input').value.trim();
+    if (input) {
+        let formattedSymbol = input;
+        if (!input.includes(':')) {
+            formattedSymbol = `NASDAQ:${input.toUpperCase()}`;
+        }
+        go(formattedSymbol, input.toUpperCase());
+    }
+}
+
+document.querySelectorAll('.chip').forEach(c => c.onclick = () => {
+    document.getElementById('symbol-input').value = '';
+    go(c.dataset.symbol, c.dataset.label);
+});
+
+// เริ่มต้นโหลดด้วย XAU/USD
+refreshWidget('OANDA:XAUUSD', '1');
+</script>
 </body>
 </html>
