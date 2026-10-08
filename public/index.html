@@ -505,19 +505,6 @@
         </div>
     </div>
 
-    <!-- SMC SIGNAL BOARD: ทุก Timeframe แยกกัน -->
-    <div class="card">
-        <div class="card-header">
-            <span class="card-title">🧭 SMC Signal Board — วิเคราะห์ทุก Timeframe แยกอิสระ</span>
-            <span id="board-meta" style="font-size: 11px; color: var(--text-dim);">กำลังวิเคราะห์...</span>
-        </div>
-        <div id="mtf-summary" style="margin-bottom:10px; display:flex; gap:6px; align-items:center; flex-wrap:wrap;"></div>
-        <div class="tf-board" id="tf-board"></div>
-        <div class="disclaimer">
-            แต่ละ TF คำนวณจากแท่งเทียนที่ปิดแล้วของ TF นั้นเอง (Swing → BOS/CHoCH → Order Block → FVG → Liquidity Sweep → Premium/Discount) และอัปเดตทุก 1 นาที · ถ้าไม่มี setup ที่เข้าเงื่อนไข ระบบจะแสดง NO SETUP แทนการสร้างสัญญาณ · เพื่อการศึกษาเท่านั้น ไม่ใช่คำแนะนำการลงทุน
-        </div>
-    </div>
-
     <!-- MAIN GRID (CHART & DETAIL) -->
     <div class="grid-main">
         <div style="display: flex; flex-direction: column; gap: 16px; min-width: 0;">
@@ -560,6 +547,7 @@
                 <div class="zone-group" id="tp-sl-zones-container"></div>
 
                 <div style="margin-top: 10px; font-size: 11px; color: var(--text-dim); text-align: right;" id="sig-mode-desc"></div>
+                <div class="disclaimer">ทุก TF คำนวณจากแท่งเทียนที่ปิดแล้วของ TF นั้นเอง และอัปเดตทุก 1 นาที · ถ้าไม่มี setup ที่เข้าเงื่อนไขจะแสดง NO ZONE · เพื่อการศึกษาเท่านั้น ไม่ใช่คำแนะนำการลงทุน</div>
             </div>
 
             <div class="card">
@@ -672,6 +660,10 @@ const TFS = [
     { key: '1h',  label: 'H1',  mins: 60,  tv: '60',  limit: 150 },
     { key: '4h',  label: 'H4',  mins: 240, tv: '240', limit: 150 }
 ];
+/* M1/M5 วิเคราะห์เฉพาะแท่งที่ปิดแล้วล่าสุด N แท่ง (ปรับได้ 20–50) เพื่อไม่ให้ OB/โซนเข้าไกลเกินกว่าที่ราคาจะย่อมาถึง */
+const LOOKBACK = { '1m': 50, '5m': 50 };
+/* RR เป้าหมาย TP1/TP2/TP3 ต่อ TF — TF ใหญ่ขึ้น RR ยิ่งสูงขึ้น (ปรับได้ที่นี่) */
+const TP_RR = { '1m': [1, 2, 3], '5m': [1.2, 2.4, 3.6], '15m': [1.5, 3, 4.5], '1h': [2, 4, 6], '4h': [2.5, 5, 7.5] };
 const SYNC_MS = 60000;          // วิเคราะห์ใหม่ทุก TF ทุก 1 นาที
 const NEWS_MS = 5 * 60000;      // ข่าวของสินทรัพย์ที่เปิดอยู่ ทุก 5 นาที
 const NEWS_BG_MS = 30 * 60000;  // ข่าวสินทรัพย์อื่น ทุก 30 นาที
@@ -880,7 +872,9 @@ function analyzeTF(tf, rawBars) {
     const base = { key: tf.key, label: tf.label, mins: tf.mins, nBars: bars.length };
     if (bars.length < 30) return Object.assign(base, { ok: false, reason: `ข้อมูลไม่พอ (${bars.length} แท่ง)` });
 
-    const b = bars.slice(0, -1);                    // แท่งที่ปิดแล้วเท่านั้น
+    const closed = bars.slice(0, -1);               // แท่งที่ปิดแล้วเท่านั้น
+    const lb = LOOKBACK[tf.key];
+    const b = lb ? closed.slice(-lb) : closed;      // M1/M5: ใช้เฉพาะ 50 แท่งล่าสุด
     const lastClose = bars[bars.length - 1].c;
     const k = tf.mins <= 5 ? 2 : 3;
     const a = calcATR(b, 14) || lastClose * 0.001;
@@ -892,7 +886,9 @@ function analyzeTF(tf, rawBars) {
     const fvgs = findFVGs(b, a);
     const lastEv = st.events.length ? st.events[st.events.length - 1] : null;
 
+    const allOBs = st.events.map(e => obState(b, obForEvent(b, e))).filter(o => !o.invalid);   // ไว้ใช้เป็นเป้า TP
     const res = Object.assign(base, {
+        nBars: b.length, tpObs: allOBs,
         ok: true, trend: st.trend, atr: a, lastClose, range, eqh: eq.eqh, eql: eq.eql,
         fvgs: fvgs.slice(-4).reverse(),
         lastEvent: lastEv ? { type: lastEv.type, dir: lastEv.dir, level: lastEv.level, agoMins: (b.length - 1 - lastEv.idx) * tf.mins } : null,
@@ -905,7 +901,7 @@ function analyzeTF(tf, rawBars) {
     const ob = cands.find(o => !o.touched) || cands[0];
     if (ob) {
         const dir = ob.dir;
-        const s = makeSetup(dir, { top: ob.top, bottom: ob.bottom }, 'ob', a, st.piv);
+        const s = makeSetup(dir, { top: ob.top, bottom: ob.bottom }, 'ob', a, st.piv, { tf: tf.key, obs: allOBs });
         const fvgHit = fvgs.some(g => g.dir === dir && overlaps(g, s.zone));
         const sweep = findSweep(b, st.piv, dir, k);
         const rightHalf = range ? (dir > 0 ? s.e2 < range.mid : s.e2 > range.mid) : false;
@@ -927,30 +923,39 @@ function analyzeTF(tf, rawBars) {
     return res;
 }
 
-/* สร้าง Entry/SL/TP จากโซน: Entry1=ขอบใกล้, Entry2=50%, Entry3=ขอบไกล, SL นอกโซน 0.25 ATR, TP ตามสภาพคล่อง */
-function makeSetup(dir, zone, kind, atr, piv) {
+/* สร้าง Entry/SL/TP จากโซน: Entry1=ขอบใกล้, Entry2=50%, Entry3=ขอบไกล, SL นอกโซน 0.25 ATR
+   TP: ลำดับความสำคัญ 1) ขอบ OB ฝั่งตรงข้าม  2) Swing High/Low (สภาพคล่อง)  3) RR ตามตาราง TP_RR
+   RR ขั้นต่ำของแต่ละ TP มาจาก TP_RR[TF] (TF ใหญ่ → RR สูงขึ้น) */
+function makeSetup(dir, zone, kind, atr, piv, ctx) {
     const E1 = dir > 0 ? zone.top : zone.bottom;
     const E3 = dir > 0 ? zone.bottom : zone.top;
     const E2 = (zone.top + zone.bottom) / 2;
     const SL = dir > 0 ? zone.bottom - 0.25 * atr : zone.top + 0.25 * atr;
     const R = Math.max(Math.abs(E2 - SL), 0.3 * atr);
+    const sortD = (x, y) => dir > 0 ? x - y : y - x;
     const lv = (piv || []).filter(p => dir > 0 ? (p.type === 'H' && p.p > E1) : (p.type === 'L' && p.p < E1))
-        .map(p => p.p).sort((x, y) => dir > 0 ? x - y : y - x);
-    let prev = E2; const tps = [];
-    [1, 2, 3].forEach(m => {
-        let c = lv.find(x => dir * (x - prev) > 0.3 * R && Math.abs(x - E2) / R >= m * 0.8);
-        if (c === undefined) c = E2 + dir * m * R;
-        if (dir * (c - prev) <= 0) c = prev + dir * R;
-        tps.push(c); prev = c;
+        .map(p => p.p).sort(sortD);
+    // OB ฝั่งตรงข้าม: BUY → ขอบล่างของ Bearish OB เหนือ entry, SELL → ขอบบนของ Bullish OB ใต้ entry
+    const obLv = ((ctx && ctx.obs) || []).filter(o => o.dir === -dir)
+        .map(o => dir > 0 ? o.bottom : o.top).filter(x => dir * (x - E1) > 0).sort(sortD);
+    const rrT = TP_RR[ctx && ctx.tf] || TP_RR['1m'];
+    let prev = E2; const tps = [], src = [];
+    rrT.forEach(m => {
+        const pick = arr => arr.find(x => dir * (x - prev) > 0.3 * R && Math.abs(x - E2) / R >= m * 0.8 && Math.abs(x - E2) / R <= m * 1.6);
+        let c = pick(obLv), t = 'OB';
+        if (c === undefined) { c = pick(lv); t = 'Swing'; }
+        if (c === undefined) { c = E2 + dir * m * R; t = 'RR'; }
+        if (dir * (c - prev) <= 0) { c = prev + dir * R; t = 'RR'; }
+        tps.push(c); src.push(t); prev = c;
     });
-    return { dir, kind, zone: { top: zone.top, bottom: zone.bottom }, e1: E1, e2: E2, e3: E3, sl: SL, tps, rr: tps.map(t => Math.abs(t - E2) / R), conf: [], sweep: null };
+    return { dir, kind, zone: { top: zone.top, bottom: zone.bottom }, e1: E1, e2: E2, e3: E3, sl: SL, tps, tpSrc: src, rr: tps.map(t => Math.abs(t - E2) / R), conf: [], sweep: null };
 }
 
 /* โซนรอเข้า เมื่อไม่มี OB: 1) Breaker (OB ที่ถูกทะลุ → กลับด้าน) 2) FVG ที่ยังไม่ถูกเติม 3) OTE Fib 62–79% */
 function buildWatch(res, b, st, atr) {
     const px = res.lastClose;
     const mk = (dir, zone, kind, label) => {
-        const s = makeSetup(dir, zone, kind, atr, st.piv);
+        const s = makeSetup(dir, zone, kind, atr, st.piv, { tf: res.key, obs: res.tpObs });
         if (dir > 0 ? px < s.sl : px > s.sl) return null;      // ราคาทะลุ SL ของโซนนั้นไปแล้ว
         s.label = label; s.conf = [{ ok: true, label: 'โซนรอเข้า: ' + label }];
         return s;
@@ -1289,7 +1294,7 @@ function flipKey(a) { return `${a.key}|${a.setup.kind}|${a.setup.dir}|${a.setup.
 function reverseSetup(a) {
     if (a._rev) return a._rev;
     const o = a.setup;
-    const s = makeSetup(-o.dir, o.zone, 'reversal', a.atr, a.piv);
+    const s = makeSetup(-o.dir, o.zone, 'reversal', a.atr, a.piv, { tf: a.key, obs: a.tpObs });
     s.label = 'Reversal (Breaker)';
     s.conf = [{ ok: true, label: `SL ${o.dir > 0 ? 'BUY' : 'SELL'} โดน → กลับด้าน` }, { ok: true, label: 'Breaker Block' }];
     s.grade = 'R'; s.score = 2; s.total = 2;
@@ -1417,9 +1422,9 @@ function renderDetail() {
             zoneRow(dc, 'Entry 2 (50% ของโซน) :', dc, '$' + fmt(s.e2, r)) +
             zoneRow(dc, 'Entry 3 (ขอบไกล) :', dc, '$' + fmt(s.e3, r));
         tz.innerHTML = zoneRow('sl', 'SL (นอกโซน + 0.25 ATR) :', 'sl', '$' + fmt(s.sl, r)) +
-            s.tps.map((t, i) => zoneRow('tp', `TP ${i + 1} (RR 1:${s.rr[i].toFixed(1)}) :`, 'tp', '$' + fmt(t, r))).join('');
+            s.tps.map((t, i) => zoneRow('tp', `TP ${i + 1} (RR 1:${s.rr[i].toFixed(1)} · ${(s.tpSrc || [])[i] || 'RR'}) :`, 'tp', '$' + fmt(t, r))).join('');
         chips.innerHTML = s.conf.map(x => `<span class="cf ${x.ok ? 'on' : ''}">${x.ok ? '✓' : '·'} ${esc(x.label)}</span>`).join('') + ` <span class="cf on">${s.grade === 'W' ? 'WATCH' : s.grade === 'R' ? 'REVERSAL' : 'Grade ' + s.grade}</span>`;
-        $('sig-mode-desc').textContent = v.kind === 'reversal' ? `${tfL}: ออเดอร์เดิมโดน SL → วิเคราะห์ใหม่แล้ว กลับด้านเป็นโซน Breaker รอราคากลับมาทดสอบ` : v.kind !== 'ob' ? `${tfL}: ยังไม่มี OB ใช้ได้ → แสดงเป็นโซนรอเข้า (${s.label})` : `โหมด: ${tfL} SMC (BOS/CHoCH + OB + FVG + Liquidity) · คำนวณจากแท่งที่ปิดแล้ว ${a.nBars - 1} แท่ง`;
+        $('sig-mode-desc').textContent = v.kind === 'reversal' ? `${tfL}: ออเดอร์เดิมโดน SL → วิเคราะห์ใหม่แล้ว กลับด้านเป็นโซน Breaker รอราคากลับมาทดสอบ` : v.kind !== 'ob' ? `${tfL}: ยังไม่มี OB ใช้ได้ → แสดงเป็นโซนรอเข้า (${s.label})` : `โหมด: ${tfL} SMC (BOS/CHoCH + OB + FVG + Liquidity) · คำนวณจากแท่งที่ปิดแล้วล่าสุด ${a.nBars} แท่ง`;
     } else {
         ez.innerHTML = `<div style="font-size:12.5px;color:var(--text-dim);line-height:1.5;">${esc(a.reason || 'ยังไม่มี setup ที่เข้าเงื่อนไข')}<br>ระบบจะไม่สร้างสัญญาณปลอม — รอโครงสร้าง/OB ใหม่ในรอบวิเคราะห์ถัดไป</div>`;
         tz.innerHTML = ''; chips.innerHTML = '';
