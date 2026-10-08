@@ -631,13 +631,6 @@
 
     <div class="card">
         <div class="card-header">
-            <span class="card-title">📡 สถานะแหล่งข่าวรอบล่าสุด</span>
-        </div>
-        <div id="source-status-container"></div>
-    </div>
-
-    <div class="card">
-        <div class="card-header">
             <span class="card-title" id="sources-main-title">📚 แหล่งข้อมูลอ้างอิงเพิ่มเติม</span>
         </div>
         <div class="sources-grid" id="sources-grid-container"></div>
@@ -660,10 +653,16 @@ const TFS = [
     { key: '1h',  label: 'H1',  mins: 60,  tv: '60',  limit: 150 },
     { key: '4h',  label: 'H4',  mins: 240, tv: '240', limit: 150 }
 ];
-/* M1/M5 วิเคราะห์เฉพาะแท่งที่ปิดแล้วล่าสุด N แท่ง (ปรับได้ 20–50) เพื่อไม่ให้ OB/โซนเข้าไกลเกินกว่าที่ราคาจะย่อมาถึง */
-const LOOKBACK = { '1m': 50, '5m': 50 };
-/* RR เป้าหมาย TP1/TP2/TP3 ต่อ TF — TF ใหญ่ขึ้น RR ยิ่งสูงขึ้น (ปรับได้ที่นี่) */
-const TP_RR = { '1m': [1, 2, 3], '5m': [1.2, 2.4, 3.6], '15m': [1.5, 3, 4.5], '1h': [2, 4, 6], '4h': [2.5, 5, 7.5] };
+/* TF เล็ก (M1/M5/M15) วิเคราะห์เฉพาะแท่งที่ปิดแล้วล่าสุด N แท่ง (ปรับได้ 20–50) เพื่อไม่ให้ใช้ High/Low/OB เก่าที่ไกลเกินไป */
+const LOOKBACK = { '1m': 50, '5m': 50, '15m': 50 };
+/* OB ต้อง "ใหม่" (อายุนับจากแท่งที่เกิด BOS/CHoCH ไม่เกิน N แท่ง) และ "อยู่ใกล้ราคา" (ไม่เกิน N × ATR ของ TF นั้น) */
+const MAX_AGE = { '1m': 40, '5m': 40, '15m': 40 };
+const MAX_REACH = { '1m': 2.5, '5m': 3, '15m': 3, '1h': 4, '4h': 5 };
+/* Entry: ไม้แรกดักหน้าขอบ OB ออกมา ENTRY_FRONT×ATR เพื่อให้ราคาไปถึงก่อน; ไม้ 2 = 25% ของ OB, ไม้ 3 = 60% ของ OB (ไม่ลงไปสุดขอบไกล) */
+const ENTRY_FRONT = 0.2;
+/* TP1/TP2/TP3: ระยะอย่างน้อย max(RR × R, ATR × ตาราง) — TF ใหญ่ขึ้น RR และระยะ ATR ยิ่งมากขึ้น */
+const TP_RR  = { '1m': [1.5, 2.5, 4], '5m': [1.5, 3, 5], '15m': [2, 3.5, 6], '1h': [2, 4, 7], '4h': [2.5, 5, 8] };
+const TP_ATR = { '1m': [2, 3.5, 5.5], '5m': [2.5, 4.5, 7], '15m': [3, 5.5, 8.5], '1h': [3, 6, 10], '4h': [3.5, 7, 11] };
 const SYNC_MS = 60000;          // วิเคราะห์ใหม่ทุก TF ทุก 1 นาที
 const NEWS_MS = 5 * 60000;      // ข่าวของสินทรัพย์ที่เปิดอยู่ ทุก 5 นาที
 const NEWS_BG_MS = 30 * 60000;  // ข่าวสินทรัพย์อื่น ทุก 30 นาที
@@ -715,7 +714,7 @@ const DIRECT = [
     { name: 'OilPrice.com', url: 'https://oilprice.com/rss/main', region: 'INTL', assets: ['USOIL'] }
 ];
 
-const FF_URL = 'https://nfs.faireconomy.media/ff_calendar_thisweek.json';
+const FF_URLS = ['https://nfs.faireconomy.media/ff_calendar_thisweek.json', 'https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json'];
 const N8N_URL = 'https://n8n.biquote.io/webhook/economic-calendar';
 
 /* ---------------------------------------------------------------------
@@ -876,19 +875,21 @@ function analyzeTF(tf, rawBars) {
     const lb = LOOKBACK[tf.key];
     const b = lb ? closed.slice(-lb) : closed;      // M1/M5: ใช้เฉพาะ 50 แท่งล่าสุด
     const lastClose = bars[bars.length - 1].c;
-    const k = tf.mins <= 5 ? 2 : 3;
+    const k = tf.mins <= 15 ? 2 : 3;
     const a = calcATR(b, 14) || lastClose * 0.001;
     const st = buildStructure(b, k);
     const eq = equalLevels(st.piv, a);
-    const lastH = [...st.piv].reverse().find(p => p.type === 'H');
-    const lastL = [...st.piv].reverse().find(p => p.type === 'L');
+    const maxAge = MAX_AGE[tf.key], reach = MAX_REACH[tf.key] || 5;
+    const recentPiv = maxAge ? st.piv.filter(p => b.length - 1 - p.i <= maxAge) : st.piv;   // ใช้ High/Low ใหม่เท่านั้น
+    const lastH = [...recentPiv].reverse().find(p => p.type === 'H') || [...st.piv].reverse().find(p => p.type === 'H');
+    const lastL = [...recentPiv].reverse().find(p => p.type === 'L') || [...st.piv].reverse().find(p => p.type === 'L');
     const range = (lastH && lastL && lastH.p > lastL.p) ? { hi: lastH.p, lo: lastL.p, mid: (lastH.p + lastL.p) / 2 } : null;
     const fvgs = findFVGs(b, a);
     const lastEv = st.events.length ? st.events[st.events.length - 1] : null;
 
     const allOBs = st.events.map(e => obState(b, obForEvent(b, e))).filter(o => !o.invalid);   // ไว้ใช้เป็นเป้า TP
     const res = Object.assign(base, {
-        nBars: b.length, tpObs: allOBs,
+        nBars: b.length, tpObs: allOBs, reach,
         ok: true, trend: st.trend, atr: a, lastClose, range, eqh: eq.eqh, eql: eq.eql,
         fvgs: fvgs.slice(-4).reverse(),
         lastEvent: lastEv ? { type: lastEv.type, dir: lastEv.dir, level: lastEv.level, agoMins: (b.length - 1 - lastEv.idx) * tf.mins } : null,
@@ -897,8 +898,14 @@ function analyzeTF(tf, rawBars) {
     res.piv = st.piv;
 
     // OB ในทิศของเทรนด์ปัจจุบัน: ต้องไม่ถูกทะลุ, ชอบอันที่ยังไม่ถูกแตะ
-    const cands = st.trend ? st.events.filter(e => e.dir === st.trend).slice(-4).reverse().map(e => obState(b, obForEvent(b, e))).filter(o => !o.invalid) : [];
-    const ob = cands.find(o => !o.touched) || cands[0];
+    // ต้องใหม่ (≤ MAX_AGE แท่ง) และอยู่ใกล้ราคา (≤ MAX_REACH ATR วัดถึง Entry1) → เลือกอันที่ใกล้ราคาที่สุด (OB ที่ถูกแตะแล้วโดนหักคะแนน)
+    const reachOf = (dir, z) => { const e1 = dir > 0 ? z.top + ENTRY_FRONT * a : z.bottom - ENTRY_FRONT * a; return Math.max(0, dir > 0 ? lastClose - e1 : e1 - lastClose) / a; };
+    const cands = (st.trend ? st.events.filter(e => e.dir === st.trend).map(e => obState(b, obForEvent(b, e))) : [])
+        .filter(o => !o.invalid && (!maxAge || b.length - 1 - o.brk <= maxAge))
+        .map(o => Object.assign(o, { dist: reachOf(o.dir, o) }))
+        .filter(o => o.dist <= reach)
+        .sort((x, y) => (x.dist + (x.touched ? 0.75 : 0)) - (y.dist + (y.touched ? 0.75 : 0)));
+    const ob = cands[0];
     if (ob) {
         const dir = ob.dir;
         const s = makeSetup(dir, { top: ob.top, bottom: ob.bottom }, 'ob', a, st.piv, { tf: tf.key, obs: allOBs });
@@ -916,39 +923,44 @@ function analyzeTF(tf, rawBars) {
         res.setup = s;
     } else {
         // ไม่มี OB ใช้ได้ → ไม่ปล่อยว่าง แสดง "โซนรอเข้า" (Breaker → FVG → OTE) แทน
-        res.reason = st.trend ? 'OB ทุกอันถูกทะลุแล้ว' : 'ยังไม่เกิดโครงสร้างชัดเจน';
+        res.reason = st.trend ? `ไม่มี OB ที่ใหม่และอยู่ใกล้ราคา (≤ ${reach} ATR)` : 'ยังไม่เกิดโครงสร้างชัดเจน';
         res.setup = buildWatch(res, b, st, a);
         if (res.setup) res.reason += ' — แสดงเป็นโซนรอเข้าแทน';
     }
     return res;
 }
 
-/* สร้าง Entry/SL/TP จากโซน: Entry1=ขอบใกล้, Entry2=50%, Entry3=ขอบไกล, SL นอกโซน 0.25 ATR
-   TP: ลำดับความสำคัญ 1) ขอบ OB ฝั่งตรงข้าม  2) Swing High/Low (สภาพคล่อง)  3) RR ตามตาราง TP_RR
-   RR ขั้นต่ำของแต่ละ TP มาจาก TP_RR[TF] (TF ใหญ่ → RR สูงขึ้น) */
+/* สร้าง Entry/SL/TP จากโซน
+   Entry1 = ดักหน้าขอบโซน ENTRY_FRONT×ATR (ราคาไปถึงแน่ๆ), Entry2 = 25% ของโซน, Entry3 = 60% ของโซน, SL = นอกขอบไกล 0.25 ATR
+   RR คิดจากราคาเข้าเฉลี่ย 3 ไม้
+   TP: ระยะอย่างน้อย max(RR×R, ATR×TP_ATR) แล้วเลือก 1) ขอบ OB ฝั่งตรงข้าม 2) Swing High/Low 3) ระยะตามตาราง */
 function makeSetup(dir, zone, kind, atr, piv, ctx) {
-    const E1 = dir > 0 ? zone.top : zone.bottom;
-    const E3 = dir > 0 ? zone.bottom : zone.top;
-    const E2 = (zone.top + zone.bottom) / 2;
+    const Z = zone.top - zone.bottom;
+    const E1 = dir > 0 ? zone.top + ENTRY_FRONT * atr : zone.bottom - ENTRY_FRONT * atr;
+    const E2 = dir > 0 ? zone.top - 0.25 * Z : zone.bottom + 0.25 * Z;
+    const E3 = dir > 0 ? zone.top - 0.60 * Z : zone.bottom + 0.60 * Z;
+    const EA = (E1 + E2 + E3) / 3;
     const SL = dir > 0 ? zone.bottom - 0.25 * atr : zone.top + 0.25 * atr;
-    const R = Math.max(Math.abs(E2 - SL), 0.3 * atr);
+    const R = Math.max(Math.abs(EA - SL), 0.3 * atr);
     const sortD = (x, y) => dir > 0 ? x - y : y - x;
     const lv = (piv || []).filter(p => dir > 0 ? (p.type === 'H' && p.p > E1) : (p.type === 'L' && p.p < E1))
         .map(p => p.p).sort(sortD);
     // OB ฝั่งตรงข้าม: BUY → ขอบล่างของ Bearish OB เหนือ entry, SELL → ขอบบนของ Bullish OB ใต้ entry
     const obLv = ((ctx && ctx.obs) || []).filter(o => o.dir === -dir)
         .map(o => dir > 0 ? o.bottom : o.top).filter(x => dir * (x - E1) > 0).sort(sortD);
-    const rrT = TP_RR[ctx && ctx.tf] || TP_RR['1m'];
-    let prev = E2; const tps = [], src = [];
-    rrT.forEach(m => {
-        const pick = arr => arr.find(x => dir * (x - prev) > 0.3 * R && Math.abs(x - E2) / R >= m * 0.8 && Math.abs(x - E2) / R <= m * 1.6);
+    const tf = ctx && ctx.tf;
+    const rrT = TP_RR[tf] || TP_RR['1m'], atrT = TP_ATR[tf] || TP_ATR['1m'];
+    let prev = EA; const tps = [], src = [];
+    rrT.forEach((m, i) => {
+        const want = Math.max(m * R, atrT[i] * atr);   // ระยะ TP ขั้นต่ำจากราคาเข้าเฉลี่ย
+        const pick = arr => arr.find(x => dir * (x - prev) > 0.3 * R && Math.abs(x - EA) >= want * 0.85 && Math.abs(x - EA) <= want * 1.8);
         let c = pick(obLv), t = 'OB';
         if (c === undefined) { c = pick(lv); t = 'Swing'; }
-        if (c === undefined) { c = E2 + dir * m * R; t = 'RR'; }
+        if (c === undefined) { c = EA + dir * want; t = 'RR'; }
         if (dir * (c - prev) <= 0) { c = prev + dir * R; t = 'RR'; }
         tps.push(c); src.push(t); prev = c;
     });
-    return { dir, kind, zone: { top: zone.top, bottom: zone.bottom }, e1: E1, e2: E2, e3: E3, sl: SL, tps, tpSrc: src, rr: tps.map(t => Math.abs(t - E2) / R), conf: [], sweep: null };
+    return { dir, kind, zone: { top: zone.top, bottom: zone.bottom }, e1: E1, e2: E2, e3: E3, ea: EA, sl: SL, tps, tpSrc: src, rr: tps.map(t => Math.abs(t - EA) / R), conf: [], sweep: null };
 }
 
 /* โซนรอเข้า เมื่อไม่มี OB: 1) Breaker (OB ที่ถูกทะลุ → กลับด้าน) 2) FVG ที่ยังไม่ถูกเติม 3) OTE Fib 62–79% */
@@ -957,6 +969,7 @@ function buildWatch(res, b, st, atr) {
     const mk = (dir, zone, kind, label) => {
         const s = makeSetup(dir, zone, kind, atr, st.piv, { tf: res.key, obs: res.tpObs });
         if (dir > 0 ? px < s.sl : px > s.sl) return null;      // ราคาทะลุ SL ของโซนนั้นไปแล้ว
+        if (Math.max(0, dir > 0 ? px - s.e1 : s.e1 - px) / atr > (res.reach || 5)) return null;   // โซนไกลเกินไป
         s.label = label; s.conf = [{ ok: true, label: 'โซนรอเข้า: ' + label }];
         return s;
     };
@@ -1000,8 +1013,9 @@ function liveStatus(a, price, setupOverride) {
     if (!s) return { code: 'NOSETUP' };
     if (!(price > 0)) return { code: 'WAIT', dist: null };
     if (s.dir > 0 ? price < s.sl : price > s.sl) return { code: 'INVALID' };
-    if (price >= s.zone.bottom && price <= s.zone.top) return { code: 'INZONE' };
-    const dist = s.dir > 0 ? price - s.zone.top : s.zone.bottom - price;
+    const hi = s.dir > 0 ? s.e1 : s.zone.top, lo = s.dir > 0 ? s.zone.bottom : s.e1;   // ช่วงเข้าออเดอร์ (รวมไม้แรกที่ดักหน้าขอบ)
+    if (price >= lo && price <= hi) return { code: 'INZONE' };
+    const dist = s.dir > 0 ? price - hi : lo - price;
     if (dist < 0) return { code: 'INZONE', deep: true };   // ทะลุผ่านโซนลงไปแต่ยังไม่ถึง SL
     return { code: dist <= 1.5 * a.atr ? 'APPROACH' : 'WAIT', dist: dist / a.atr };
 }
@@ -1358,7 +1372,7 @@ function cardHTML(a, price) {
         body += `<div class="tf-struct">${trendText(a)} · ${esc(eventText(a))}</div>`;
         if (v.active) {
             const s = v.s, r = a.lastClose;
-            body += `<div class="tf-row"><span>Entry (${esc(KIND_LABEL[s.kind] || 'โซน')})</span><b>${fmt(s.zone.bottom, r)} – ${fmt(s.zone.top, r)}</b></div>
+            body += `<div class="tf-row"><span>Entry (${esc(KIND_LABEL[s.kind] || 'โซน')})</span><b>${fmt(Math.min(s.e1, s.e3), r)} – ${fmt(Math.max(s.e1, s.e3), r)}</b></div>
                 <div class="tf-row"><span>SL</span><b style="color:var(--down)">${fmt(s.sl, r)}</b></div>
                 <div class="tf-row"><span>TP1 / TP2 / TP3</span><b style="color:var(--gold)">${fmt(s.tps[0], r)} / ${fmt(s.tps[1], r)} / ${fmt(s.tps[2], r)}</b></div>
                 <div class="chips-row">${s.conf.map(c => `<span class="cf ${c.ok ? 'on' : ''}">${c.ok ? '✓' : '·'} ${esc(c.label)}</span>`).join('')}</div>
@@ -1418,9 +1432,9 @@ function renderDetail() {
     if (v.active) {
         const s = v.s, dc = s.dir > 0 ? 'buy' : 'sell';
         ez.innerHTML = zoneRow(dc, (KIND_LABEL[s.kind] || 'โซน') + ' :', dc, `${fmt(s.zone.bottom, r)} – ${fmt(s.zone.top, r)}`) +
-            zoneRow(dc, 'Entry 1 (ขอบใกล้) :', dc, '$' + fmt(s.e1, r)) +
-            zoneRow(dc, 'Entry 2 (50% ของโซน) :', dc, '$' + fmt(s.e2, r)) +
-            zoneRow(dc, 'Entry 3 (ขอบไกล) :', dc, '$' + fmt(s.e3, r));
+            zoneRow(dc, 'Entry 1 (ดักหน้าขอบโซน) :', dc, '$' + fmt(s.e1, r)) +
+            zoneRow(dc, 'Entry 2 (25% ของโซน) :', dc, '$' + fmt(s.e2, r)) +
+            zoneRow(dc, 'Entry 3 (60% ของโซน) :', dc, '$' + fmt(s.e3, r));
         tz.innerHTML = zoneRow('sl', 'SL (นอกโซน + 0.25 ATR) :', 'sl', '$' + fmt(s.sl, r)) +
             s.tps.map((t, i) => zoneRow('tp', `TP ${i + 1} (RR 1:${s.rr[i].toFixed(1)} · ${(s.tpSrc || [])[i] || 'RR'}) :`, 'tp', '$' + fmt(t, r))).join('');
         chips.innerHTML = s.conf.map(x => `<span class="cf ${x.ok ? 'on' : ''}">${x.ok ? '✓' : '·'} ${esc(x.label)}</span>`).join('') + ` <span class="cf on">${s.grade === 'W' ? 'WATCH' : s.grade === 'R' ? 'REVERSAL' : 'Grade ' + s.grade}</span>`;
@@ -1454,10 +1468,37 @@ async function fetchT(u, ms = 12000) {
     const c = new AbortController(), t = setTimeout(() => c.abort(), ms);
     try { return await fetch(u, { signal: c.signal, cache: 'no-store' }); } finally { clearTimeout(t); }
 }
+/* CORS proxy หลายตัว ยิงแบบ "สลับสำรอง": เริ่มตัวแรกก่อน ถ้าช้า/พังค่อยปล่อยตัวถัดไป (ตัวไหนได้ข้อมูลถูกต้องก่อนใช้ตัวนั้น) */
 const PROXIES = [
-    u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-    u => `https://corsproxy.io/?${encodeURIComponent(u)}`
+    { build: u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}` },
+    { build: u => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`, unwrap: t => JSON.parse(t).contents },
+    { build: u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}` },
+    { build: u => `https://corsproxy.io/?${encodeURIComponent(u)}` },
+    { build: u => `https://thingproxy.freeboard.io/fetch/${u}` }
 ];
+function viaProxies(url, parse, ms = 10000, gap = 2500) {
+    return new Promise((resolve, reject) => {
+        let finished = false, started = 0, running = 0, timer = null;
+        const arm = () => { clearTimeout(timer); if (!finished && started < PROXIES.length) timer = setTimeout(() => { launch(); arm(); }, gap); };
+        const launch = () => {
+            if (finished || started >= PROXIES.length) return;
+            const px = PROXIES[started++]; running++;
+            (async () => {
+                try {
+                    const r = await fetchT(px.build(url), ms); if (!r.ok) throw new Error('http');
+                    let t = await r.text(); if (px.unwrap) t = px.unwrap(t);
+                    const v = parse(t); if (!v) throw new Error('empty');
+                    if (!finished) { finished = true; clearTimeout(timer); resolve(v); }
+                } catch (e) { /* ลองตัวถัดไป */ }
+                finally {
+                    running--;
+                    if (!finished) { if (started < PROXIES.length) { launch(); arm(); } else if (running === 0) { clearTimeout(timer); reject(new Error('proxy failed')); } }
+                }
+            })();
+        };
+        launch(); arm();
+    });
+}
 function parseXML(text) {
     const doc = new DOMParser().parseFromString(text, 'text/xml');
     if (doc.querySelector('parsererror')) throw new Error('xml');
@@ -1471,12 +1512,7 @@ function parseXML(text) {
     });
 }
 async function fetchFeed(url) {
-    for (const p of PROXIES) {
-        try {
-            const r = await fetchT(p(url)); if (!r.ok) continue;
-            const items = parseXML(await r.text()); if (items.length) return items;
-        } catch (e) { /* ลอง proxy ถัดไป */ }
-    }
+    try { return await viaProxies(url, t => { const items = parseXML(t); return items.length ? items : null; }); } catch (e) { /* สำรองสุดท้าย */ }
     try {   // สำรองสุดท้าย: rss2json (อาจแคชนานกว่า)
         const r = await fetchT(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(url)}`);
         if (r.ok) {
@@ -1489,14 +1525,12 @@ async function fetchFeed(url) {
     } catch (e) { /* ignore */ }
     throw new Error('feed failed');
 }
+/* JSON (ปฏิทิน): ลองตรงก่อน → ไม่ได้ค่อยผ่าน proxy; ต้องเป็น array ที่มีข้อมูลเท่านั้นจึงนับว่าสำเร็จ */
+const parseJsonArr = t => { const j = JSON.parse(t); return Array.isArray(j) && j.length ? j : null; };
 async function fetchJSONSmart(url) {
-    try { const r = await fetchT(url); if (r.ok) return await r.json(); } catch (e) { /* ลอง proxy */ }
-    for (const p of PROXIES) {
-        try { const r = await fetchT(p(url)); if (r.ok) return JSON.parse(await r.text()); } catch (e) { /* next */ }
-    }
-    throw new Error('json failed');
+    try { const r = await fetchT(url, 8000); if (r.ok) { const j = parseJsonArr(await r.text()); if (j) return j; } } catch (e) { /* ลอง proxy */ }
+    return viaProxies(url, parseJsonArr);
 }
-async function fetchJSONDirect(url) { const r = await fetchT(url); if (!r.ok) throw new Error('bad'); return r.json(); }
 
 const gnTask = (q, lang, region) => ({ name: `Google News${lang === 'th' ? ' TH' : ''}: ${q}`, url: gnews(q, lang), region, gn: true });
 function sharedTasks() {
@@ -1570,9 +1604,20 @@ function setNewsBusy(b) { const m = $('news-busy'); if (m) m.textContent = b ? '
 /* ---------------------------------------------------------------------
    ปฏิทินเศรษฐกิจ (ข่าว "ในตาราง")
    --------------------------------------------------------------------- */
+async function fetchFF() {
+    let last;
+    for (const u of FF_URLS) { try { return await fetchJSONSmart(u); } catch (e) { last = e; } }
+    throw last || new Error('ff failed');
+}
+function loadCalCache() {   // แสดงปฏิทินรอบก่อน (ข้อมูลจริงที่เคยดึงสำเร็จ) ระหว่างรอดึงใหม่/กรณีดึงไม่สำเร็จ
+    try {
+        const c = JSON.parse(store.get('kut_cal') || 'null');
+        if (c && Array.isArray(c.events) && c.events.length && Date.now() - c.ts < 7 * 86400000) S.calendar = { events: c.events, ts: c.ts, ok: true, src: c.src, cached: true };
+    } catch (e) { /* ignore */ }
+}
 async function loadCalendar() {
-    S.nextCal = Date.now() + CAL_MS;
-    const [ff, n8] = await Promise.allSettled([fetchJSONSmart(FF_URL), fetchJSONDirect(N8N_URL)]);
+    S.nextCal = Date.now() + 60000;   // ถ้าไม่สำเร็จลองใหม่ใน 1 นาที (สำเร็จแล้วค่อยเลื่อนเป็นทุก 10 นาที)
+    const [ff, n8] = await Promise.allSettled([fetchFF(), fetchJSONSmart(N8N_URL)]);
     let events = [], src = [];
     if (ff.status === 'fulfilled' && Array.isArray(ff.value) && ff.value.length) { events = normFF(ff.value); src.push('Forex Factory'); }
     const n8d = n8.status === 'fulfilled' ? n8.value : null;
@@ -1580,8 +1625,11 @@ async function loadCalendar() {
         if (events.length) { events = mergeN8n(events, n8d); src.push('Biquote n8n (Actual)'); }
         else { events = normN8nOnly(n8d); src.push('Biquote n8n'); }
     }
-    if (events.length) S.calendar = { events, ts: Date.now(), ok: true, src: src.join(' + ') };
-    else S.calendar = Object.assign({}, S.calendar, { ok: S.calendar.events.length > 0, failedAt: Date.now() });
+    if (events.length) {
+        S.calendar = { events, ts: Date.now(), ok: true, src: src.join(' + ') };
+        S.nextCal = Date.now() + CAL_MS;
+        store.set('kut_cal', JSON.stringify({ ts: S.calendar.ts, src: S.calendar.src, events }));
+    } else S.calendar = Object.assign({}, S.calendar, { ok: S.calendar.events.length > 0, failedAt: Date.now() });
     renderCalendar(); renderNews();
 }
 function evStatus(ev) {
@@ -1605,7 +1653,7 @@ function renderCalendar() {
             <td><span class="${ev.impact === 'High' ? 'imp-high' : 'imp-med'}">${ev.impact === 'High' ? '🔴 สูง' : '🟠 กลาง'}</span></td>
             <td>${esc(ev.previous || '-')}</td><td>${esc(ev.forecast || '-')}</td><td>${evStatus(ev)}</td></tr>`).join('');
     }
-    if (upd) upd.textContent = S.calendar.ts ? `🟢 ปฏิทิน: ${esc(S.calendar.src)} · อัปเดต ${new Date(S.calendar.ts).toLocaleTimeString('th-TH', { timeZone: TZ })} (เวลาไทย)` : '🔄 กำลังโหลด...';
+    if (upd) upd.textContent = S.calendar.ts ? `${S.calendar.failedAt && S.calendar.failedAt > S.calendar.ts ? '🟠' : '🟢'} ปฏิทิน: ${esc(S.calendar.src)} · อัปเดต ${new Date(S.calendar.ts).toLocaleTimeString('th-TH', { timeZone: TZ })} (เวลาไทย)${S.calendar.failedAt && S.calendar.failedAt > S.calendar.ts ? ' · ดึงรอบล่าสุดไม่สำเร็จ ใช้ข้อมูลเดิม' : ''}` : '🔄 กำลังโหลด...';
 }
 function checkReleases() {
     const now = Date.now(), A = getAsset(S.key);
@@ -1735,12 +1783,7 @@ const REF_LINKS = [
     { cat: '3. ข้อมูลสถานะ/โภคภัณฑ์/คริปโท', links: [['CFTC COT Report', 'https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm'], ['EIA Petroleum', 'https://www.eia.gov/petroleum/'], ['OPEC', 'https://www.opec.org/opec_web/en/press_room/'], ['CoinDesk', 'https://www.coindesk.com/']] }
 ];
 function renderSources() {
-    const st = $('source-status-container'), g = $('sources-grid-container');
-    const n = S.news[S.key];
-    if (st) {
-        st.innerHTML = n ? n.status.map(s => `<div class="src-line"><span>${s.ok ? '✅' : '❌'} ${esc(s.name)} ${s.region === 'TH' ? '🇹🇭' : '🌎'}</span><span style="color:var(--text-dim)">${s.ok ? s.count + ' ข่าว' : 'ล้มเหลว'}</span></div>`).join('') +
-            `<div style="font-size:11px;color:var(--text-dim);margin-top:6px;">แหล่งที่ตอบกลับ ${n.status.filter(s => s.ok).length}/${n.status.length} · รวม ${n.items.length} ข่าวหลังตัดซ้ำและกรองความเกี่ยวข้อง</div>` : '<div style="font-size:12px;color:var(--text-dim);">รอการดึงข่าว...</div>';
-    }
+    const g = $('sources-grid-container');
     if (g && !g.dataset.done) {
         g.dataset.done = '1';
         g.innerHTML = REF_LINKS.map(c => `<div class="source-cat-box"><div class="source-cat-header">${c.cat}</div><ul class="source-list">${c.links.map(l => `<li><b>${esc(l[0])}:</b> <a href="${l[1]}" target="_blank" rel="noopener noreferrer">เปิด 🔗</a></li>`).join('')}</ul></div>`).join('');
@@ -1828,6 +1871,7 @@ function init() {
     document.querySelectorAll('.chip').forEach(c => c.onclick = () => { $('symbol-input').value = ''; go(c.dataset.symbol); });
     $('symbol-input').addEventListener('keydown', e => { if (e.key === 'Enter') handleSearch(); });
     S.briefDay = store.get('kut_brief_day') || '';
+    loadCalCache();
     go('OANDA:XAUUSD');
     S.watch.forEach((k, i) => { S.nextNews[k] = k === S.key ? 0 : Date.now() + 8000 + i * 12000; });  // ทยอยดึง ไม่ยิงพร้อมกัน
     S.started = true;
