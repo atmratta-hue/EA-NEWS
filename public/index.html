@@ -465,7 +465,10 @@
         .imp-med { color: var(--gold); font-weight: bold; }
         .toast-box { position: fixed; right: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 8px; z-index: 9999; max-width: 340px; }
         .toast { background: #1d2735; border: 1px solid var(--gold); border-radius: 8px; padding: 10px 12px; font-size: 12px; line-height: 1.4; box-shadow: 0 4px 16px rgba(0,0,0,.5); }
-        .grade.gW { color: var(--blue); } .grade.gR { color: var(--purple); }
+        .grade.gW { color: var(--blue); } .grade.gR { color: var(--purple); } .grade.gCT { color: var(--gold); }
+        .tf-alt { margin-top: 8px; padding: 8px; border-radius: 8px; border: 1px dashed var(--line); background: rgba(255,255,255,0.03); font-size: 12px; display: flex; flex-direction: column; gap: 4px; }
+        .tf-alt.buy { border-color: var(--up); } .tf-alt.sell { border-color: var(--down); }
+        .tf-alt .tf-row { font-size: 11.5px; }
     </style>
 </head>
 <body>
@@ -928,6 +931,9 @@ function analyzeTF(tf, rawBars) {
         res.setup = buildWatch(res, b, st, a);
         if (res.setup) res.reason += ' — แสดงเป็นโซนรอเข้าแทน';
     }
+    // โซนสวนเทรนด์ (ทิศตรงข้ามกับ setup หลัก) — ทำให้เห็น SELL ได้แม้โครงสร้างยัง Bullish
+    const altDir = res.setup ? -res.setup.dir : (st.trend ? -st.trend : 0);
+    res.alt = altDir ? buildCounter(res, b, st, a, altDir, maxAge, k) : null;
     return res;
 }
 
@@ -989,10 +995,49 @@ function buildWatch(res, b, st, atr) {
     return null;
 }
 
+/* โซนสวนเทรนด์ (Counter-trend): ระบบเดิมเลือกเฉพาะ OB ตามเทรนด์ จึงไม่โชว์ SELL ตอนโครงสร้างยังเป็น Bullish (และกลับกัน)
+   ตรงนี้หา "ทิศตรงข้าม" แยกต่างหาก: 1) OB ฝั่งตรงข้ามที่ยังไม่ถูกทะลุ 2) FVG ฝั่งตรงข้ามที่ยังไม่ถูกเติม 3) โซน Premium/Discount (OTE 62–79%) */
+function buildCounter(res, b, st, atr, dir, maxAge, k) {
+    const px = res.lastClose, reach = res.reach || 5;
+    const gap = s => Math.max(0, dir > 0 ? px - s.e1 : s.e1 - px) / atr;
+    const mk = (zone, kind, label, extra) => {
+        const s = makeSetup(dir, zone, 'counter', atr, st.piv, { tf: res.key, obs: res.tpObs });
+        if (dir > 0 ? px < s.sl : px > s.sl) return null;      // ราคาทะลุ SL ของโซนนั้นไปแล้ว
+        if (gap(s) > reach) return null;                        // โซนไกลเกินไป
+        const sweep = findSweep(b, st.piv, dir, k);
+        const inHalf = res.range ? (dir > 0 ? s.e2 < res.range.mid : s.e2 > res.range.mid) : false;
+        s.label = 'สวนเทรนด์ · ' + label; s.src = kind; s.sweep = sweep; s.dist = gap(s);
+        s.conf = [{ ok: true, label: 'สวนเทรนด์ ' + (dir > 0 ? 'BUY' : 'SELL') + ': ' + label }, { ok: !!sweep, label: 'Liquidity Sweep' }, { ok: inHalf, label: dir > 0 ? 'อยู่โซน Discount' : 'อยู่โซน Premium' }].concat(extra || []);
+        return s;
+    };
+    // 1) OB ฝั่งตรงข้ามที่ยังใช้ได้ (ไม่ถูกปิดทะลุ) เลือกอันที่ใกล้ราคาที่สุด
+    const obs = st.events.filter(e => e.dir === dir).map(e => obState(b, obForEvent(b, e)))
+        .filter(o => !o.invalid && (!maxAge || b.length - 1 - o.brk <= maxAge * 2))
+        .map(o => ({ o, s: mk({ top: o.top, bottom: o.bottom }, 'ob', dir > 0 ? 'Bullish OB' : 'Bearish OB', [{ ok: !o.touched, label: 'OB ยังไม่ถูกแตะ' }]) }))
+        .filter(x => x.s).sort((x, y) => (x.s.dist + (x.o.touched ? 0.75 : 0)) - (y.s.dist + (y.o.touched ? 0.75 : 0)));
+    if (obs.length) { obs[0].s.ob = obs[0].o; return obs[0].s; }
+    // 2) FVG ฝั่งตรงข้าม
+    const fv = res.fvgs.filter(g => g.dir === dir).map(g => ({ g, s: mk({ top: g.top, bottom: g.bottom }, 'fvg', dir > 0 ? 'Bullish FVG' : 'Bearish FVG') }))
+        .filter(x => x.s).sort((x, y) => x.s.dist - y.s.dist);
+    if (fv.length) return fv[0].s;
+    // 3) Premium / Discount (OTE)
+    if (res.range) {
+        const r = res.range.hi - res.range.lo;
+        const zone = dir > 0 ? { top: res.range.hi - 0.62 * r, bottom: res.range.hi - 0.79 * r } : { top: res.range.lo + 0.79 * r, bottom: res.range.lo + 0.62 * r };
+        return mk(zone, 'pd', `OTE ${dir > 0 ? 'Discount' : 'Premium'} (Fib 62–79%)`);
+    }
+    return null;
+}
+
 /* ตามเทรนด์ TF ใหญ่ + สรุปเกรด */
 function analyzeAll(barsByTf) {
     const out = TFS.map(tf => analyzeTF(tf, barsByTf[tf.key]));
     out.forEach((r, i) => {
+        if (r.ok && r.alt) {
+            const higher = out.slice(i + 1).filter(x => x.ok && x.trend);
+            if (higher.length) r.alt.conf.push({ ok: higher.filter(x => x.trend === r.alt.dir).length > higher.length / 2, label: 'ตามเทรนด์ TF ใหญ่' });
+            r.alt.score = r.alt.conf.filter(c => c.ok).length; r.alt.total = r.alt.conf.length; r.alt.grade = 'CT';
+        }
         if (!r.ok || !r.setup) return;
         const higher = out.slice(i + 1).filter(x => x.ok && x.trend);
         if (higher.length) {
@@ -1343,7 +1388,30 @@ function checkStops() {
     });
     if (hit && !S.syncing && Date.now() - S.lastSync > 5000) syncAll();   // ดึงแท่งเทียนใหม่แล้วคำนวณโครงสร้างใหม่ทุก TF ทันที
 }
-const KIND_LABEL = { ob: 'Order Block', breaker: 'Breaker Block', fvg: 'FVG', pd: 'OTE', reversal: 'Reversal' };
+const KIND_LABEL = { ob: 'Order Block', breaker: 'Breaker Block', fvg: 'FVG', pd: 'OTE', reversal: 'Reversal', counter: 'Counter-trend' };
+/* มุมมองโซนสวนเทรนด์ของ TF นั้น (ไม่ใช้ระบบ flip; ถ้าราคาทะลุ SL ไปแล้วจะซ่อน) */
+function altView(a, price) {
+    if (!a || !a.ok || !a.alt) return null;
+    const st = liveStatus(a, price, a.alt);
+    if (st.code === 'INVALID' || st.code === 'NODATA') return null;
+    const s = a.alt, d = s.dir;
+    let line;
+    if (st.code === 'INZONE') line = '🎯 ราคาอยู่ในโซนเข้า' + (st.deep ? ' (ลึก ใกล้ SL)' : '');
+    else if (st.code === 'APPROACH') line = `⏳ ใกล้โซนเข้า (${st.dist.toFixed(1)} ATR)`;
+    else line = `⌛ รอราคา${d > 0 ? 'ย่อ' : 'เด้ง'}เข้าโซน` + (st.dist != null ? ` (${st.dist.toFixed(1)} ATR)` : '');
+    return { s, st, d, line };
+}
+function altHTML(a, price) {
+    const v = altView(a, price); if (!v) return '';
+    const s = v.s, r = a.lastClose, buy = v.d > 0;
+    return `<div class="tf-alt ${buy ? 'buy' : 'sell'}">
+        <div class="tf-row"><b style="color:${buy ? 'var(--up)' : 'var(--down)'}">${buy ? '🟢 BUY' : '🔴 SELL'} สวนเทรนด์</b><span>${esc(s.label.replace('สวนเทรนด์ · ', ''))}</span></div>
+        <div style="color:var(--text-dim)">${v.line}</div>
+        <div class="tf-row"><span>Entry</span><b>${fmt(Math.min(s.e1, s.e3), r)} – ${fmt(Math.max(s.e1, s.e3), r)}</b></div>
+        <div class="tf-row"><span>SL</span><b style="color:var(--down)">${fmt(s.sl, r)}</b></div>
+        <div class="tf-row"><span>TP1 / TP2 / TP3</span><b style="color:var(--gold)">${fmt(s.tps[0], r)} / ${fmt(s.tps[1], r)} / ${fmt(s.tps[2], r)}</b></div>
+        <div class="tf-foot"><span>Counter-trend <b class="grade gCT">${s.score}/${s.total}</b></span><span>RR 1:${s.rr[1].toFixed(1)}</span></div></div>`;
+}
 function sigView(a, price) {
     const e = effSetup(a, price), st = e.st;
     if (st.code === 'NODATA') return { cls: 'none', badge: ['neutral', 'NO DATA'], line: esc((a && a.reason) || 'ไม่มีข้อมูล'), st, active: false, s: null };
@@ -1382,14 +1450,15 @@ function cardHTML(a, price) {
     }
     return `<div class="tf-card ${v.cls}${sel}" onclick="selectTF('${a.key}')">
         <div class="tf-h"><span class="tf-name">${a.label}</span><span class="badge ${v.badge[0]}">${v.badge[1]}</span></div>
-        <div class="tf-status">${v.line}</div>${body}</div>`;
+        <div class="tf-status">${v.line}</div>${body}${altHTML(a, price)}</div>`;
 }
 function renderBoard() {
     const el = $('tf-board'); if (!el) return;
     if (!S.analysis.length) { el.innerHTML = '<div style="color:var(--text-dim);font-size:13px;">กำลังดึงแท่งเทียนและวิเคราะห์ทุก Timeframe...</div>'; return; }
     el.innerHTML = S.analysis.map(a => cardHTML(a, S.price)).join('');
-    let buy = 0, sell = 0, watch = 0, none = 0; const inz = [];
+    let buy = 0, sell = 0, watch = 0, none = 0, ctBuy = 0, ctSell = 0; const inz = [];
     S.analysis.forEach(a => {
+        const av = altView(a, S.price); if (av) { if (av.d > 0) ctBuy++; else ctSell++; }
         const v = sigView(a, S.price);
         if (!v.active) none++;
         else {
@@ -1398,7 +1467,7 @@ function renderBoard() {
         }
     });
     const sm = $('mtf-summary');
-    if (sm) sm.innerHTML = `<span class="badge bullish">BUY ${buy}</span> <span class="badge bearish">SELL ${sell}</span> <span class="badge neutral">WATCH ${watch}</span>` + (none ? ` <span class="badge neutral">NO ZONE ${none}</span>` : '') +
+    if (sm) sm.innerHTML = `<span class="badge bullish">BUY ${buy}</span> <span class="badge bearish">SELL ${sell}</span> <span class="badge neutral">WATCH ${watch}</span>` + ((ctBuy || ctSell) ? ` <span class="badge neutral">สวนเทรนด์: BUY ${ctBuy} / SELL ${ctSell}</span>` : '') + (none ? ` <span class="badge neutral">NO ZONE ${none}</span>` : '') +
         (inz.length ? ` <span style="color:var(--gold);font-size:12px;margin-left:6px;">🎯 ราคาอยู่ในโซนเข้า: <b>${inz.join(', ')}</b></span>` : '');
 }
 function selectTF(key) {
@@ -1455,6 +1524,17 @@ function renderDetail() {
         <div class="channel-val" style="font-size:11px;color:var(--text-dim);">${v.active && v.s.sweep ? 'Sweep ล่าสุดที่ ' + fmt(v.s.sweep.level, r) : 'ยังไม่พบ liquidity sweep ล่าสุด'}</div></div>`);
     items.push(`<div class="channel-card" style="border-left:4px solid var(--blue);"><div class="channel-title">Fair Value Gap (ยังไม่ถูกเติม)</div>
         ${a.fvgs.length ? a.fvgs.slice(0, 3).map(g => `<div class="channel-val" style="color:${g.dir > 0 ? 'var(--up)' : 'var(--down)'};">${g.dir > 0 ? 'Bull' : 'Bear'} FVG: ${fmt(g.bottom, r)} – ${fmt(g.top, r)}</div>`).join('') : '<div class="channel-val" style="color:var(--text-dim);">ไม่พบ</div>'}</div>`);
+    const av = altView(a, S.price);
+    if (av) {
+        const s = av.s, buy = av.d > 0;
+        items.push(`<div class="channel-card" style="border-left:4px solid ${buy ? 'var(--up)' : 'var(--down)'};"><div class="channel-title">${buy ? '🟢 BUY' : '🔴 SELL'} สวนเทรนด์ (Counter-trend)</div>
+        <div class="channel-val" style="font-size:11px;color:var(--text-dim);">${esc(s.label.replace('สวนเทรนด์ · ', ''))} · ${av.line}</div>
+        <div class="channel-val">โซน: ${fmt(s.zone.bottom, r)} – ${fmt(s.zone.top, r)}</div>
+        <div class="channel-val">Entry: ${fmt(s.e1, r)} / ${fmt(s.e2, r)} / ${fmt(s.e3, r)}</div>
+        <div class="channel-val" style="color:var(--down);">SL: ${fmt(s.sl, r)}</div>
+        <div class="channel-val" style="color:var(--gold);">TP: ${s.tps.map(t => fmt(t, r)).join(' / ')}</div>
+        <div class="chips-row">${s.conf.map(c => `<span class="cf ${c.ok ? 'on' : ''}">${c.ok ? '✓' : '·'} ${esc(c.label)}</span>`).join('')}</div></div>`);
+    }
     kl.innerHTML = items.join('');
 }
 
