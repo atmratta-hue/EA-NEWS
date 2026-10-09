@@ -774,6 +774,7 @@ function fmt(v, ref) {
    ===================================================================== */
 function normBars(raw) {
     let out = (raw || []).map(b => ({
+        v: +(b.volume != null ? b.volume : b.vol != null ? b.vol : b.v != null ? b.v : b.tick_volume != null ? b.tick_volume : 0) || 0,
         o: +(b.open != null ? b.open : b.o), h: +(b.high != null ? b.high : b.h),
         l: +(b.low != null ? b.low : b.l), c: +(b.close != null ? b.close : b.c),
         t: b.time != null ? b.time : (b.t != null ? b.t : (b.timestamp != null ? b.timestamp : null))
@@ -945,7 +946,7 @@ function analyzeTF(tf, rawBars) {
         lastEvent: lastEv ? { type: lastEv.type, dir: lastEv.dir, level: lastEv.level, agoMins: (b.length - 1 - lastEv.idx) * tf.mins } : null,
         setup: null, reason: ''
     });
-    res.piv = st.piv; res.retr = retr;
+    res.piv = st.piv; res.retr = retr; res.b = b;
 
     // OB ในทิศของเทรนด์ปัจจุบัน: ต้องไม่ถูกทะลุ, ชอบอันที่ยังไม่ถูกแตะ
     // ต้องใหม่ (≤ MAX_AGE แท่ง) และอยู่ใกล้ราคา (≤ MAX_REACH ATR วัดถึง Entry1) → เลือกอันที่ใกล้ราคาที่สุด (OB ที่ถูกแตะแล้วโดนหักคะแนน)
@@ -1079,10 +1080,65 @@ function buildCounter(res, b, st, atr, dir, maxAge, k) {
     return null;
 }
 
+/* =====================================================================
+   ระบบที่ 2: Punport — Volume Profile & FVG (ทิศทางจาก TF4H → จุดเข้าที่ TF เล็ก)
+   ===================================================================== */
+const KZ = [['Asian', 7, 10], ['London', 14, 17], ['New York', 19, 22]];   // เวลาไทย (ฤดูร้อน; ฤดูหนาวเลื่อน +1 ชม.)
+function killZone() { const h = bkkHour(); const z = KZ.find(x => h >= x[1] && h < x[2]); return z ? z[0] : null; }
+/* Volume Profile แบบ Fixed Range: กระจาย volume ลงตามช่วง High-Low ของแต่ละแท่ง (ถ้า API ไม่มี volume ใช้น้ำหนักเวลา-ราคาแทน) */
+function volProfile(seg, lo, hi, n = 24) {
+    const bin = new Array(n).fill(0), w = (hi - lo) / n; let real = false;
+    seg.forEach(x => {
+        const vol = x.v > 0 ? (real = true, x.v) : 1, i0 = Math.max(0, Math.floor((x.l - lo) / w)), i1 = Math.min(n - 1, Math.floor((x.h - lo) / w));
+        for (let i = i0; i <= i1; i++) bin[i] += vol / (i1 - i0 + 1);
+    });
+    let poc = 0; bin.forEach((v, i) => { if (v > bin[poc]) poc = i; });
+    const tot = bin.reduce((s, v) => s + v, 0); let a = poc, z = poc, acc = bin[poc];
+    while (acc < 0.7 * tot && (a > 0 || z < n - 1)) {
+        const up = z < n - 1 ? bin[z + 1] : -1, dn = a > 0 ? bin[a - 1] : -1;
+        if (up >= dn) { z++; acc += bin[z]; } else { a--; acc += bin[a]; }
+    }
+    return { poc: lo + (poc + 0.5) * w, vah: lo + (z + 1) * w, val: lo + a * w, real };
+}
+/* dir = ทิศทาง TF4H. VP: ลากจากต้นขา momentum → สุดขา; POC อยู่ฝั่งไกลเกิน 65% ของ range ใช้ POC ไม่งั้นใช้ VAH/VAL; SL ขอบ range; TP 1.3–2.0R
+   FVG: เข้ากลาง FVG, SL เลยขอบ FVG 50% ของขนาด FVG, TP 1.3–1.5R */
+function punport(r, dir) {
+    if (!r.ok || !dir || !r.b) return null;
+    const b = r.b, a = r.atr, px = r.lastClose, out = { dir, vp: null, fvg: null };
+    const s0 = [...r.piv].reverse().find(p => p.type === (dir > 0 ? 'L' : 'H'));
+    if (s0) {
+        const seg = b.slice(s0.i), hi = Math.max(...seg.map(x => x.h)), lo = Math.min(...seg.map(x => x.l));
+        if (hi - lo >= 2 * a) {
+            const vp = volProfile(seg, lo, hi), pos = (vp.poc - lo) / (hi - lo);
+            const useP = dir < 0 ? pos >= 0.65 : pos <= 0.35, lvl = useP ? vp.poc : (dir < 0 ? vp.vah : vp.val);
+            const e = lvl - dir * 0.1 * a, sl = dir < 0 ? hi + 0.1 * a : lo - 0.1 * a, R = Math.abs(e - sl);
+            if (R >= 0.3 * a && (dir < 0 ? px < sl : px > sl))
+                out.vp = { e, sl, lvl, lvlName: useP ? 'POC' : (dir < 0 ? 'VAH' : 'VAL'), poc: vp.poc, vah: vp.vah, val: vp.val, hi, lo, pos, real: vp.real, tps: [1.3, 2].map(m => e + dir * m * R), rr: [1.3, 2], gap: Math.max(0, dir < 0 ? e - px : px - e) / a };
+        }
+    }
+    const g = (r.fvgs || []).filter(x => x.dir === dir).sort((x, y) => Math.abs((x.top + x.bottom) / 2 - px) - Math.abs((y.top + y.bottom) / 2 - px))[0];
+    if (g) {
+        const sz = g.top - g.bottom, e = (g.top + g.bottom) / 2, sl = dir > 0 ? g.bottom - 0.5 * sz : g.top + 0.5 * sz;
+        if (dir > 0 ? px > sl : px < sl) out.fvg = { e, sl, top: g.top, bottom: g.bottom, tps: [1.3, 1.5].map(m => e + dir * m * Math.abs(e - sl)), rr: [1.3, 1.5], gap: Math.max(0, dir > 0 ? px - e : e - px) / a };
+    }
+    return (out.vp || out.fvg) ? out : null;
+}
+function punCardHTML(a, r) {
+    const p = a.pun, kz = killZone(), c = x => fmt(x, r);
+    const head = `<div class="channel-title">⚙️ Punport: Volume Profile & FVG</div><div class="channel-val" style="font-size:11px;color:${kz ? 'var(--up)' : 'var(--text-dim)'};">Kill zone: ${kz || 'นอกเวลา'}</div>`;
+    if (!p) return `<div class="channel-card" style="border-left:4px solid var(--gold2);">${head}<div class="channel-val" style="font-size:11px;color:var(--text-dim);">ยังไม่มีทิศทาง TF4H / ยังไม่มีขา momentum หรือ FVG ที่ใช้ได้</div></div>`;
+    const d = p.dir > 0 ? '🟢 BUY' : '🔴 SELL';
+    const vp = p.vp ? `<div class="channel-val" style="margin-top:6px;">${d} Volume Profile (${p.vp.real ? 'Volume' : 'Time-price'})</div><div class="channel-val" style="font-size:11px;color:var(--text-dim);">VAH ${c(p.vp.vah)} · POC ${c(p.vp.poc)} (${Math.round(p.vp.pos * 100)}%) · VAL ${c(p.vp.val)}</div><div class="channel-val">Entry @${p.vp.lvlName}: ${c(p.vp.e)} (${p.vp.gap.toFixed(1)} ATR)</div><div class="channel-val" style="color:var(--down);">SL: ${c(p.vp.sl)}</div><div class="channel-val" style="color:var(--gold);">TP: ${p.vp.tps.map(c).join(' / ')} (RR 1.3–2.0)</div>` : '';
+    const fv = p.fvg ? `<div class="channel-val" style="margin-top:6px;">${d} FVG 50%</div><div class="channel-val">FVG ${c(p.fvg.bottom)} – ${c(p.fvg.top)} · Entry: ${c(p.fvg.e)} (${p.fvg.gap.toFixed(1)} ATR)</div><div class="channel-val" style="color:var(--down);">SL: ${c(p.fvg.sl)}</div><div class="channel-val" style="color:var(--gold);">TP: ${p.fvg.tps.map(c).join(' / ')} (RR 1.3–1.5)</div>` : '';
+    return `<div class="channel-card" style="border-left:4px solid var(--gold2);">${head}${vp}${fv}</div>`;
+}
+
 /* ตามเทรนด์ TF ใหญ่ + สรุปเกรด */
 function analyzeAll(barsByTf) {
     const out = TFS.map(tf => analyzeTF(tf, barsByTf[tf.key]));
     const htfZone = (z, dir, i) => out.slice(i + 1).some(x => x.ok && (x.tpObs || []).some(o => o.dir === dir && overlaps(o, z)));
+    const h4 = out.find(x => x.key === '4h'), dir4 = h4 && h4.ok ? h4.trend : 0;
+    out.forEach(r => { r.pun = punport(r, dir4); });
     out.forEach((r, i) => {
         if (r.ok && r.alt) {
             const higher = out.slice(i + 1).filter(x => x.ok && x.trend);
@@ -1096,6 +1152,9 @@ function analyzeAll(barsByTf) {
             const same = higher.filter(x => x.trend === r.setup.dir).length;
             r.setup.conf.push({ ok: same > higher.length / 2, label: 'ตามเทรนด์ TF ใหญ่' });
         }
+        { const p = r.pun, z = r.setup.zone, w = 0.3 * r.atr;
+          const hit = p && p.dir === r.setup.dir && ((p.vp && overlaps(z, { bottom: p.vp.lvl - w, top: p.vp.lvl + w })) || (p.fvg && overlaps(z, p.fvg)));
+          r.setup.conf.push({ ok: !!hit, label: 'ตรงกับ VP/FVG (Punport)' }); }
         if (i < out.length - 1) r.setup.conf.push({ ok: htfZone(r.setup.zone, r.setup.dir, i), label: 'อยู่ในโซน OB ของ TF ใหญ่' });
         r.setup.score = r.setup.conf.filter(c => c.ok).length;
         r.setup.total = r.setup.conf.length;
@@ -1588,6 +1647,7 @@ function renderDetail() {
         <div class="channel-val" style="color:var(--gold);">TP: ${s.tps.map(t => fmt(t, r)).join(' / ')}</div>
         <div class="chips-row">${s.conf.map(c => `<span class="cf ${c.ok ? 'on' : ''}">${c.ok ? '✓' : '·'} ${esc(c.label)}</span>`).join('')}</div></div>`);
     }
+    items.push(punCardHTML(a, r));
     kl.innerHTML = items.join('');
 }
 
