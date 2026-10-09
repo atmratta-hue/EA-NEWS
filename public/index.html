@@ -550,7 +550,7 @@
                 <div class="zone-group" id="tp-sl-zones-container"></div>
 
                 <div style="margin-top: 10px; font-size: 11px; color: var(--text-dim); text-align: right;" id="sig-mode-desc"></div>
-                <div class="disclaimer">ทุก TF คำนวณจากแท่งเทียนรวมแท่งที่กำลังก่อตัว (ราคาสด) คำนวณใหม่ทุก ~1 วินาที และซิงก์แท่งเทียน M1–M15 จาก API ทุก 10 วินาที · ถ้าไม่มี setup ที่เข้าเงื่อนไขจะแสดง NO ZONE · เพื่อการศึกษาเท่านั้น ไม่ใช่คำแนะนำการลงทุน</div>
+                <div class="disclaimer">ทุก TF คำนวณจากแท่งเทียนรวมแท่งที่กำลังก่อตัว (ราคาสด) คำนวณใหม่ทุก ~1 วินาที และซิงก์แท่งเทียน M1–M15 จาก API ทุก 10 วินาที · ถ้าไม่มี setup ที่เข้าเงื่อนไขจะแสดงโซนเข้าล่วงหน้า (Master Zone) แทน · เพื่อการศึกษาเท่านั้น ไม่ใช่คำแนะนำการลงทุน</div>
             </div>
 
             <div class="card">
@@ -1113,7 +1113,7 @@ function punport(r, dir) {
         if (hi - lo >= 2 * a) {
             const vp = volProfile(seg, lo, hi), pos = (vp.poc - lo) / (hi - lo);
             const useP = dir < 0 ? pos >= 0.65 : pos <= 0.35, lvl = useP ? vp.poc : (dir < 0 ? vp.vah : vp.val);
-            const e = lvl - dir * 0.1 * a, sl = dir < 0 ? hi + 0.1 * a : lo - 0.1 * a, R = Math.abs(e - sl);
+            const e = lvl - dir * 0.1 * a, sl0 = dir < 0 ? hi + 0.1 * a : lo - 0.1 * a, sl = dir < 0 ? Math.min(sl0, e + 1.5 * a) : Math.max(sl0, e - 1.5 * a), R = Math.abs(e - sl);
             if (R >= 0.3 * a && (dir < 0 ? px < sl : px > sl))
                 out.vp = { e, sl, lvl, lvlName: useP ? 'POC' : (dir < 0 ? 'VAH' : 'VAL'), poc: vp.poc, vah: vp.vah, val: vp.val, hi, lo, pos, real: vp.real, tps: [1.3, 2].map(m => e + dir * m * R), rr: [1.3, 2], gap: Math.max(0, dir < 0 ? e - px : px - e) / a };
         }
@@ -1135,12 +1135,146 @@ function punCardHTML(a, r) {
     return `<div class="channel-card" style="border-left:4px solid var(--gold2);">${head}${vp}${fv}</div>`;
 }
 
+/* =====================================================================
+   ระบบที่ 3: Fib + Fixed Range Volume Profile (กติกา VAH / POC / VAL)
+   range = สวิง High–Low ล่าสุด (รวมแท่งที่กำลังก่อตัว) · โซน = ±w รอบเส้น (w = 10% ของ VAH–VAL, ขั้นต่ำ 0.3 ATR)
+   1) อยู่โซน VAH → SELL  2) อยู่โซน VAL → BUY  3) วิ่ง VAH→POC → รอกลับตัว BUY  4) วิ่ง POC→VAL → รอกลับตัว BUY ที่ VAL  5) VAH→POC ไม่กลับตัว → SELL
+   ===================================================================== */
+function fibVP(r) {
+    if (!r.ok || !r.b || !r.piv) return null;
+    const b = r.b, a = r.atr, px = r.lastClose, n = b.length;
+    const H = [...r.piv].reverse().find(p => p.type === 'H'), L = [...r.piv].reverse().find(p => p.type === 'L');
+    if (!H || !L) return null;
+    const s0 = Math.min(H.i, L.i), seg = b.slice(s0);
+    const hi = Math.max(...seg.map(x => x.h)), lo = Math.min(...seg.map(x => x.l));
+    if (hi - lo < 2 * a) return null;
+    const vp = volProfile(seg, lo, hi), w = Math.max(0.1 * (vp.vah - vp.val), 0.3 * a), down = H.i < L.i;
+    const fibs = [0.382, 0.5, 0.618, 0.786].map(f => ({ f, p: down ? lo + f * (hi - lo) : hi - f * (hi - lo) }));
+    let iH = -1, iL = -1;
+    for (let i = n - 1; i >= s0 && (iH < 0 || iL < 0); i--) { if (iH < 0 && b[i].h >= vp.vah - w) iH = i; if (iL < 0 && b[i].l <= vp.val + w) iL = i; }
+    const origin = iH > iL ? 'VAH' : iL > iH ? 'VAL' : null;
+    const inH = px >= vp.vah - w, inL = px <= vp.val + w, inP = Math.abs(px - vp.poc) <= w, c1 = b[n - 2];
+    const bullRev = lvl => !!c1 && c1.l <= lvl + w && c1.c > lvl && ((c1.c > c1.o && c1.c - c1.o >= 0.4 * (c1.h - c1.l)) || Math.min(c1.o, c1.c) - c1.l >= 2 * Math.abs(c1.c - c1.o));
+    const mk = (dir, rule, text, wait, lvl, e, sl0, tps) => { const sl = dir > 0 ? Math.max(sl0, e - 1.5 * a) : Math.min(sl0, e + 1.5 * a); return { dir, rule, text, wait, lvl, e, sl, tps, rr: tps.map(x => Math.abs(x - e) / Math.max(Math.abs(e - sl), 1e-9)) }; };
+    let o;
+    if (inH) o = mk(-1, 1, 'ราคาอยู่โซน VAH → SELL', false, vp.vah, px, Math.max(hi, vp.vah) + 0.1 * a, [vp.poc, vp.val]);
+    else if (inL) o = mk(1, 2, 'ราคาอยู่โซน VAL → BUY' + (bullRev(vp.val) ? ' (มีแท่งกลับตัวยืนยัน)' : ' · รอแท่งกลับตัวยืนยันได้'), false, vp.val, px, Math.min(lo, vp.val) - 0.1 * a, [vp.poc, vp.vah]);
+    else if (origin === 'VAH' && inP) {
+        o = bullRev(vp.poc) ? mk(1, 3, 'วิ่ง VAH→POC เกิดกลับตัว → BUY', false, vp.poc, px, Math.min(c1.l, vp.poc - w) - 0.1 * a, [(vp.poc + vp.vah) / 2, vp.vah - w])
+            : mk(1, 3, 'ถึง POC · รอจังหวะกลับตัว BUY (ถ้าหลุด POC ลง → SELL)', true, vp.poc, vp.poc, vp.poc - w - 0.1 * a, [(vp.poc + vp.vah) / 2, vp.vah - w]);
+    } else if (origin === 'VAH' && px > vp.poc + w) o = mk(1, 3, 'กำลังวิ่ง VAH→POC · รอจังหวะกลับตัว BUY ที่ POC', true, vp.poc, vp.poc, vp.poc - w - 0.1 * a, [(vp.poc + vp.vah) / 2, vp.vah - w]);
+    else if (origin === 'VAH' && px < vp.poc - w) o = mk(-1, 5, 'VAH→POC ไม่กลับตัว → SELL ต่อ (วิ่ง POC→VAL · รอกลับตัว BUY ที่ VAL)', false, vp.poc, px, vp.poc + w + 0.1 * a, [vp.val, lo]);
+    else o = { dir: 0, rule: 0, text: origin === 'VAL' ? 'วิ่งขึ้นจาก VAL → POC (นอกกติกา · รอ)' : 'ยังไม่เข้าเงื่อนไข', wait: true, lvl: null, tps: [], rr: [] };
+    const near = o.lvl != null ? fibs.find(x => Math.abs(x.p - o.lvl) <= w) : null;
+    return Object.assign(o, { vp, fibs, w, hi, lo, down, origin, fibHit: near ? near.f : null });
+}
+function fibCardHTML(a, r) {
+    const f = a.fvp, c = x => fmt(x, r), head = '<div class="channel-title">📐 Fib + Fixed Range VP</div>';
+    if (!f) return `<div class="channel-card" style="border-left:4px solid var(--purple);">${head}<div class="channel-val" style="font-size:11px;color:var(--text-dim);">ยังไม่มีสวิง High–Low ที่กว้างพอ</div></div>`;
+    const col = f.dir > 0 ? 'var(--up)' : f.dir < 0 ? 'var(--down)' : 'var(--text-dim)';
+    const lv = `<div class="channel-val" style="font-size:11px;color:var(--text-dim);">VAH ${c(f.vp.vah)} · POC ${c(f.vp.poc)} · VAL ${c(f.vp.val)} (${f.vp.real ? 'Volume' : 'Time-price'})</div><div class="channel-val" style="font-size:11px;color:var(--text-dim);">Fib (${f.down ? 'ย่อขึ้น' : 'ย่อลง'}): ${f.fibs.map(x => x.f + '=' + c(x.p)).join(' · ')}</div>`;
+    const sig = `<div class="channel-val" style="color:${col};margin-top:6px;">${f.dir > 0 ? '🟢 BUY' : f.dir < 0 ? '🔴 SELL' : '⚪'} ${f.wait && f.dir ? '(รอ) ' : ''}${esc(f.text)}</div>` + (f.fibHit ? `<div class="channel-val" style="font-size:11px;color:var(--gold);">✓ ตรงกับ Fib ${f.fibHit} (Confluence)</div>` : '');
+    const px = f.dir ? `<div class="channel-val">Entry: ${c(f.e)}</div><div class="channel-val" style="color:var(--down);">SL: ${c(f.sl)}</div><div class="channel-val" style="color:var(--gold);">TP: ${f.tps.map(c).join(' / ')} (RR ${f.rr.map(x => x.toFixed(1)).join(' / ')})</div>` : '';
+    return `<div class="channel-card" style="border-left:4px solid var(--purple);">${head}${lv}${sig}${px}</div>`;
+}
+
+/* =====================================================================
+   MASTER ENGINE: รวมทุกระบบ (SMC OB/สวนเทรนด์ + Punport VP/FVG + Fib+VP) → หาโซนซ้อน (Confluence) → จุดเข้าที่แม่นยำที่สุด
+   ไม่มีออเดอร์ที่ active ก็ยังแสดง "โซนล่วงหน้า" ที่คะแนนดีที่สุดและอยู่ใกล้ราคาเสมอ
+   ===================================================================== */
+function buildMaster(r, dir4) {
+    if (!r.ok) return null;
+    const a = r.atr, px = r.lastClose, tol = 0.15 * a, C = [];
+    const add = (dir, src, wt, x, y, sl, tps) => { if (dir && Number.isFinite(x) && Number.isFinite(y)) C.push({ dir, src, wt, lo: Math.min(x, y), hi: Math.max(x, y), sl, tps: tps || [] }); };
+    const s = r.setup, p = r.pun, f = r.fvp;
+    if (s) add(s.dir, s.kind === 'ob' ? 'SMC OB' : 'SMC ' + (KIND_LABEL[s.kind] || 'โซน'), s.kind === 'ob' ? 3 + (s.grade === 'A' ? 1 : 0) : 1.5, s.zone.bottom, s.zone.top, s.sl, s.tps);
+    if (r.alt) add(r.alt.dir, 'สวนเทรนด์', 1, r.alt.zone.bottom, r.alt.zone.top, r.alt.sl, r.alt.tps);
+    if (p && p.vp) add(p.dir, 'VP ' + p.vp.lvlName, 2, p.vp.lvl - 0.3 * a, p.vp.lvl + 0.3 * a, p.vp.sl, p.vp.tps);
+    if (p && p.fvg) { const q = 0.25 * (p.fvg.top - p.fvg.bottom); add(p.dir, 'FVG 50%', 2, p.fvg.e - q, p.fvg.e + q, p.fvg.sl, p.fvg.tps); }
+    if (f && f.dir) add(f.dir, 'Fib+VP' + (f.wait ? ' (รอกลับตัว)' : ''), (f.wait ? 1.5 : 2) + (f.fibHit ? 0.5 : 0), f.lvl - f.w, f.lvl + f.w, f.sl, f.tps);
+    if (!C.length && r.range) {   // สำรองสุดท้าย: Fib OTE 62–79% ของ range
+        const d = dir4 || r.trend || (px > r.range.mid ? -1 : 1), R = r.range.hi - r.range.lo;
+        add(d, 'Fib OTE 62–79%', 1, d > 0 ? r.range.hi - 0.79 * R : r.range.lo + 0.62 * R, d > 0 ? r.range.hi - 0.62 * R : r.range.lo + 0.79 * R, NaN, []);
+    }
+    const cl = [];
+    C.forEach(seed => {
+        const grp = C.filter(c => c.dir === seed.dir && c.lo <= seed.hi + tol && seed.lo <= c.hi + tol), dir = seed.dir;
+        const lo = Math.max(...grp.map(c => c.lo)), hi = Math.min(...grp.map(c => c.hi)), main = [...grp].sort((x, y) => y.wt - x.wt)[0];
+        let z = lo <= hi ? { lo, hi } : { lo: main.lo, hi: main.hi };
+        if (z.hi - z.lo > 0.8 * a) {   // โซนกว้างเกิน → บีบให้แคบ ≤ 0.8 ATR รอบจุดเฉลี่ยถ่วงน้ำหนัก
+            const sw = grp.reduce((q, c) => q + c.wt, 0), mid = grp.reduce((q, c) => q + c.wt * (c.lo + c.hi) / 2, 0) / sw;
+            z = { lo: Math.max(z.lo, mid - 0.4 * a), hi: Math.min(z.hi, mid + 0.4 * a) };
+            if (z.lo > z.hi) z = { lo: mid - 0.4 * a, hi: mid + 0.4 * a };
+        }
+        const e = (z.lo + z.hi) / 2, edge = dir > 0 ? z.lo : z.hi;
+        /* SL แคบ: ใช้ SL เชิงโครงสร้างที่ "ใกล้ขอบโซนที่สุด" (ห่างขอบ 0.1–0.8 ATR) ไม่มีก็ขอบโซน ± 0.25 ATR และจำกัดความเสี่ยงไม่เกิน 1.2 ATR + ครึ่งโซน */
+        const near = grp.map(c => c.sl).filter(x => Number.isFinite(x) && dir * (edge - x) >= 0.1 * a && dir * (edge - x) <= 0.8 * a).sort((x, y) => dir * (y - x))[0];
+        let sl = near != null ? near - dir * 0.05 * a : edge - dir * 0.25 * a;
+        const maxR = 1.2 * a + (z.hi - z.lo) / 2;
+        if (Math.abs(e - sl) > maxR) sl = e - dir * maxR;
+        if (Math.abs(e - sl) < 0.3 * a) sl = e - dir * 0.3 * a;
+        if (dir > 0 ? px < sl : px > sl) return;
+        const R = Math.abs(e - sl), tps = [];
+        grp.flatMap(c => c.tps).filter(x => dir * (x - e) >= 1.2 * R).sort((x, y) => dir * (x - y)).forEach(x => { if (tps.length < 3 && (!tps.length || Math.abs(x - tps[tps.length - 1]) > 0.3 * R)) tps.push(x); });
+        [1.5, 2.5, 4].forEach(m => { if (tps.length < 3) { const x = e + dir * m * R; if (!tps.length || dir * (x - tps[tps.length - 1]) > 0.3 * R) tps.push(x); } });
+        const tr = (dir4 ? (dir === dir4 ? 1.5 : -1) : 0) + (r.trend ? (dir === r.trend ? 1 : -1) : 0);   // สวนเทรนด์ทั้ง H4 และ TF นี้ = หักคะแนน
+        const score = grp.reduce((q, c) => q + c.wt, 0) + tr + (s && s.sweep && s.dir === dir ? 1 : 0);
+        cl.push({ dir, zone: z, e, sl, tps: tps.slice(0, 3), rr: tps.slice(0, 3).map(x => Math.abs(x - e) / R), score, grade: score >= 7 ? 'A+' : score >= 5 ? 'A' : score >= 3.5 ? 'B' : 'C', srcs: [...new Set(grp.map(c => c.src))], gap: Math.max(0, dir > 0 ? px - z.hi : z.lo - px) / a });
+    });
+    let best = null;
+    cl.forEach(c => {   // มีโซนฝั่งตรงข้ามคะแนนสูงอยู่ระหว่างจุดเข้า–SL = SL คือจุดเข้าฝั่งตรงข้าม → หักคะแนน
+        const lo = c.dir > 0 ? c.sl - 0.3 * a : c.e, hi = c.dir > 0 ? c.e : c.sl + 0.3 * a;
+        const opp = Math.max(0, ...cl.filter(o => o.dir !== c.dir && o.zone.lo <= hi && lo <= o.zone.hi).map(o => o.score));
+        c.conflict = opp > 0; c.rank = c.score - 0.35 * c.gap - 0.5 * opp;
+        if (!best || c.rank > best.rank) best = c;
+    });
+    return best;
+}
+function masterStatus(m, px, a) {
+    if (!(px > 0)) return { code: 'WAIT', gap: null };
+    if (m.dir > 0 ? px < m.sl : px > m.sl) return { code: 'INVALID' };
+    if (px >= m.zone.lo && px <= m.zone.hi) return { code: 'INZONE' };
+    const gap = Math.max(0, m.dir > 0 ? px - m.zone.hi : m.zone.lo - px) / a;
+    return gap === 0 ? { code: 'INZONE', deep: true } : { code: gap <= 1.5 ? 'APPROACH' : 'WAIT', gap };
+}
+function masterLine(m, st) {
+    if (st.code === 'INZONE') return '🎯 ราคาอยู่ในโซนเข้า' + (st.deep ? ' (ลึก ใกล้ SL)' : '') + ' — จุดเข้าแม่นยำ';
+    if (st.code === 'APPROACH') return `⏳ ใกล้โซนเข้า (${st.gap.toFixed(1)} ATR)`;
+    if (st.code === 'INVALID') return '⚠️ โซนถูกทะลุ — กำลังหาโซนใหม่';
+    return `⌛ โซนล่วงหน้า รอราคา${m.dir > 0 ? 'ย่อ' : 'เด้ง'}เข้าโซน` + (st.gap != null ? ` (${st.gap.toFixed(1)} ATR)` : '');
+}
+function masterMini(a, price) {
+    const m = a && a.ok && a.master; if (!m) return '';
+    const st = masterStatus(m, price, a.atr), r = a.lastClose, buy = m.dir > 0, c = x => fmt(x, r);
+    return `<div class="tf-alt ${buy ? 'buy' : 'sell'}"><div class="tf-row"><b style="color:${buy ? 'var(--up)' : 'var(--down)'}">🎯 MASTER ${buy ? 'BUY' : 'SELL'}</b><span>${m.grade} · ${m.score.toFixed(1)}</span></div>
+        <div style="color:var(--text-dim)">${masterLine(m, st)}</div><div style="color:var(--text-dim);font-size:11px;">${m.srcs.map(esc).join(' + ')}</div>
+        <div class="tf-row"><span>Zone</span><b>${c(m.zone.lo)} – ${c(m.zone.hi)}</b></div><div class="tf-row"><span>Entry</span><b>${c(m.e)}</b></div>
+        <div class="tf-row"><span>SL</span><b style="color:var(--down)">${c(m.sl)}</b></div><div class="tf-row"><span>TP1/2/3</span><b style="color:var(--gold)">${m.tps.map(c).join(' / ')}</b></div></div>`;
+}
+function masterCardHTML(a, r) {
+    const m = a.master, head = '<div class="channel-title">🎯 Master Entry (รวมทุกระบบ)</div>';
+    if (!m) return `<div class="channel-card" style="border-left:4px solid var(--gold);">${head}<div class="channel-val" style="font-size:11px;color:var(--text-dim);">ข้อมูลไม่พอสร้างโซน</div></div>`;
+    const st = masterStatus(m, S.price || r, a.atr), buy = m.dir > 0, c = x => fmt(x, r);
+    return `<div class="channel-card" style="border-left:4px solid var(--gold);">${head}<div class="channel-val" style="color:${buy ? 'var(--up)' : 'var(--down)'};">${buy ? '🟢 BUY' : '🔴 SELL'} · Grade ${m.grade} (${m.score.toFixed(1)})</div>
+        <div class="channel-val" style="font-size:11px;color:var(--text-dim);">${masterLine(m, st)}</div><div class="channel-val" style="font-size:11px;color:var(--gold);">ซ้อนกัน: ${m.srcs.map(esc).join(' + ')}</div>${m.conflict ? '<div class="channel-val" style="font-size:11px;color:var(--down);">⚠️ มีโซนฝั่งตรงข้ามใกล้ SL — ระวังโดนกวาดแล้วกลับด้าน</div>' : ''}
+        <div class="channel-val">โซน: ${c(m.zone.lo)} – ${c(m.zone.hi)}</div><div class="channel-val">Entry แม่นยำ: ${c(m.e)}</div><div class="channel-val" style="color:var(--down);">SL: ${c(m.sl)}</div>
+        <div class="channel-val" style="color:var(--gold);">TP: ${m.tps.map(c).join(' / ')} (RR ${m.rr.map(x => x.toFixed(1)).join(' / ')})</div></div>`;
+}
+function fillMaster(a, r, ez, tz, chips) {
+    const m = a.master;
+    if (!m) { ez.innerHTML = `<div style="font-size:12.5px;color:var(--text-dim);">${esc(a.reason || 'ข้อมูลไม่พอสร้างโซน')}</div>`; tz.innerHTML = ''; chips.innerHTML = ''; return; }
+    const dc = m.dir > 0 ? 'buy' : 'sell', c = x => '$' + fmt(x, r);
+    ez.innerHTML = zoneRow(dc, 'Master Zone (ล่วงหน้า) :', dc, `${fmt(m.zone.lo, r)} – ${fmt(m.zone.hi, r)}`) + zoneRow(dc, 'Entry แม่นยำ (จุดซ้อน) :', dc, c(m.e));
+    tz.innerHTML = zoneRow('sl', 'SL :', 'sl', c(m.sl)) + m.tps.map((x, i) => zoneRow('tp', `TP ${i + 1} (RR 1:${m.rr[i].toFixed(1)}) :`, 'tp', c(x))).join('');
+    chips.innerHTML = m.srcs.map(x => `<span class="cf on">✓ ${esc(x)}</span>`).join('') + ` <span class="cf on">MASTER ${m.grade}</span>`;
+}
+
 /* ตามเทรนด์ TF ใหญ่ + สรุปเกรด */
 function analyzeAll(barsByTf) {
     const out = TFS.map(tf => analyzeTF(tf, barsByTf[tf.key]));
     const htfZone = (z, dir, i) => out.slice(i + 1).some(x => x.ok && (x.tpObs || []).some(o => o.dir === dir && overlaps(o, z)));
     const h4 = out.find(x => x.key === '4h'), dir4 = h4 && h4.ok ? h4.trend : 0;
-    out.forEach(r => { r.pun = punport(r, dir4); });
+    out.forEach(r => { r.pun = punport(r, dir4); r.fvp = fibVP(r); });
     out.forEach((r, i) => {
         if (r.ok && r.alt) {
             const higher = out.slice(i + 1).filter(x => x.ok && x.trend);
@@ -1154,6 +1288,7 @@ function analyzeAll(barsByTf) {
             const same = higher.filter(x => x.trend === r.setup.dir).length;
             r.setup.conf.push({ ok: same > higher.length / 2, label: 'ตามเทรนด์ TF ใหญ่' });
         }
+        { const f = r.fvp; r.setup.conf.push({ ok: !!(f && f.dir === r.setup.dir && !f.wait), label: 'สอดคล้อง Fib+VP (VAH/POC/VAL)' }); }
         { const p = r.pun, z = r.setup.zone, w = 0.3 * r.atr;
           const hit = p && p.dir === r.setup.dir && ((p.vp && overlaps(z, { bottom: p.vp.lvl - w, top: p.vp.lvl + w })) || (p.fvg && overlaps(z, p.fvg)));
           r.setup.conf.push({ ok: !!hit, label: 'ตรงกับ VP/FVG (Punport)' }); }
@@ -1163,6 +1298,7 @@ function analyzeAll(barsByTf) {
         const ratio = r.setup.score / r.setup.total;
         r.setup.grade = r.setup.kind !== 'ob' ? 'W' : (ratio >= 0.8 ? 'A' : ratio >= 0.55 ? 'B' : 'C');
     });
+    out.forEach(r => { r.master = buildMaster(r, dir4); });
     return out;
 }
 
@@ -1585,7 +1721,7 @@ function cardHTML(a, price) {
     }
     return `<div class="tf-card ${v.cls}${sel}" onclick="selectTF('${a.key}')">
         <div class="tf-h"><span class="tf-name">${a.label}</span><span class="badge ${v.badge[0]}">${v.badge[1]}</span></div>
-        <div class="tf-status">${v.line}</div>${body}${altHTML(a, price)}</div>`;
+        <div class="tf-status">${v.line}</div>${body}${masterMini(a, price)}${altHTML(a, price)}</div>`;
 }
 function renderBoard() {
     const el = $('tf-board'); if (!el) return;
@@ -1628,8 +1764,8 @@ function renderDetail() {
         ez.innerHTML = ''; tz.innerHTML = ''; chips.innerHTML = ''; badge.className = 'badge neutral'; badge.textContent = 'NO DATA';
         $('sig-mode-desc').textContent = a ? a.reason : 'กำลังโหลด...'; kl.innerHTML = ''; return;
     }
-    const c = !v.active ? 'var(--text-dim)' : v.s.dir > 0 ? 'var(--up)' : 'var(--down)';
-    pill.textContent = v.active ? `${tfL} ${v.badge[1]} ${v.s.dir > 0 ? '🟢' : '🔴'}` : `${tfL} NO ZONE ⚪`;
+    const c = !v.active ? (a.master ? (a.master.dir > 0 ? 'var(--up)' : 'var(--down)') : 'var(--text-dim)') : v.s.dir > 0 ? 'var(--up)' : 'var(--down)';
+    pill.textContent = v.active ? `${tfL} ${v.badge[1]} ${v.s.dir > 0 ? '🟢' : '🔴'}` : a.master ? `${tfL} ZONE ${a.master.dir > 0 ? 'BUY 🟢' : 'SELL 🔴'}` : `${tfL} NO ZONE ⚪`;
     pill.style.color = c; pill.style.borderColor = c;
     badge.className = `badge ${v.badge[0]}`; badge.textContent = v.line.replace(/<[^>]+>/g, '');
     $('entry-card-subtag').textContent = `${tfL} · Structure ${trendText(a)}`;
@@ -1645,8 +1781,7 @@ function renderDetail() {
         chips.innerHTML = s.conf.map(x => `<span class="cf ${x.ok ? 'on' : ''}">${x.ok ? '✓' : '·'} ${esc(x.label)}</span>`).join('') + ` <span class="cf on">${s.grade === 'W' ? 'WATCH' : s.grade === 'R' ? 'REVERSAL' : 'Grade ' + s.grade}</span>`;
         $('sig-mode-desc').textContent = v.kind === 'reversal' ? `${tfL}: ออเดอร์เดิมโดน SL → วิเคราะห์ใหม่แล้ว กลับด้านเป็นโซน Breaker รอราคากลับมาทดสอบ` : v.kind !== 'ob' ? `${tfL}: ยังไม่มี OB ใช้ได้ → แสดงเป็นโซนรอเข้า (${s.label})` : `โหมด: ${tfL} SMC (BOS/CHoCH + OB + FVG + Liquidity) · คำนวณจากแท่งที่ปิดแล้วล่าสุด ${a.nBars} แท่ง`;
     } else {
-        ez.innerHTML = `<div style="font-size:12.5px;color:var(--text-dim);line-height:1.5;">${esc(a.reason || 'ยังไม่มี setup ที่เข้าเงื่อนไข')}<br>ระบบจะไม่สร้างสัญญาณปลอม — รอโครงสร้าง/OB ใหม่ในรอบวิเคราะห์ถัดไป</div>`;
-        tz.innerHTML = ''; chips.innerHTML = '';
+        fillMaster(a, r, ez, tz, chips);
         $('sig-mode-desc').textContent = `โหมด: ${tfL} SMC · ไม่มี setup`;
     }
     /* Key levels จริงจากโครงสร้าง */
@@ -1670,7 +1805,7 @@ function renderDetail() {
         <div class="channel-val" style="color:var(--gold);">TP: ${s.tps.map(t => fmt(t, r)).join(' / ')}</div>
         <div class="chips-row">${s.conf.map(c => `<span class="cf ${c.ok ? 'on' : ''}">${c.ok ? '✓' : '·'} ${esc(c.label)}</span>`).join('')}</div></div>`);
     }
-    items.push(punCardHTML(a, r));
+    items.unshift(masterCardHTML(a, r)); items.push(punCardHTML(a, r)); items.push(fibCardHTML(a, r));
     kl.innerHTML = items.join('');
 }
 
