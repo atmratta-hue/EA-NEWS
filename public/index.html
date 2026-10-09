@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KU TRADER v2 - Multi-Timeframe SMC & Multi-Source News Engine</title>
+    <title>KU TRADER</title>
     <style>
         :root {
             --bg: #0b0e14;
@@ -563,6 +563,15 @@
         </div>
     </div>
 
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">🧭 Multi-Timeframe Signal Board (SMC)</span>
+            <span id="board-meta" style="font-size:11px; color:var(--text-dim);">อัปเดตทุก 1 นาที</span>
+        </div>
+        <div id="mtf-summary" style="margin-bottom:10px;"></div>
+        <div class="tf-board" id="tf-board"></div>
+    </div>
+
     <!-- NEWS CENTER -->
     <div class="card" style="margin-top: 16px;">
         <div class="card-header" style="flex-wrap:wrap; gap:8px;">
@@ -657,7 +666,7 @@ const TFS = [
     { key: '4h',  label: 'H4',  mins: 240, tv: '240', limit: 150 }
 ];
 /* TF เล็ก (M1/M5/M15) วิเคราะห์เฉพาะแท่งที่ปิดแล้วล่าสุด N แท่ง (ปรับได้ 20–50) เพื่อไม่ให้ใช้ High/Low/OB เก่าที่ไกลเกินไป */
-const LOOKBACK = { '1m': 50, '5m': 50, '15m': 50 };
+const LOOKBACK = { '1m': 20, '5m': 50, '15m': 50 };
 /* OB ต้อง "ใหม่" (อายุนับจากแท่งที่เกิด BOS/CHoCH ไม่เกิน N แท่ง) และ "อยู่ใกล้ราคา" (ไม่เกิน N × ATR ของ TF นั้น) */
 const MAX_AGE = { '1m': 40, '5m': 40, '15m': 40 };
 const MAX_REACH = { '1m': 2.5, '5m': 3, '15m': 3, '1h': 4, '4h': 5 };
@@ -796,20 +805,34 @@ function findPivots(b, k) {
     return piv;
 }
 /* เดินทีละแท่ง: pivot จะ "ยืนยัน" หลังผ่านไป k แท่ง; ปิดทะลุ swing = BOS (ตามเทรนด์) / CHoCH (สวนเทรนด์) */
+/* ตัด Set การเคลื่อนที่ (บทที่ 2): รวม pivot ให้สลับ H/L และทิ้งสวิงที่สั้นกว่า 1 ATR */
+function swingSet(piv, a) {
+    const out = [];
+    [...piv].sort((x, y) => x.i - y.i).forEach(p => {
+        const l = out[out.length - 1];
+        if (!l) { out.push(p); return; }
+        if (l.type === p.type) { if (p.type === 'H' ? p.p > l.p : p.p < l.p) out[out.length - 1] = p; return; }
+        if (Math.abs(p.p - l.p) >= a) out.push(p);
+    });
+    return out;
+}
+/* BOS = ปิดเนื้อเทียนทะลุ swing ตามเทรนด์ / CHoCH = สวนเทรนด์; CHoCH เก็บ str = จำนวนโครงสร้างที่ถูกทำลาย (≥2 = กลับตัวแน่นอน, 1 = รอยืนยัน) */
 function buildStructure(b, k) {
-    const piv = findPivots(b, k);
+    const piv = swingSet(findPivots(b, k), calcATR(b, 14) || 0);
     const conf = new Map();
     piv.forEach(p => { const c = p.i + k; if (!conf.has(c)) conf.set(c, []); conf.get(c).push(p); });
     let sh = null, sl = null, trend = 0;
-    const events = [];
+    const hs = [], ls = [], events = [];
     for (let j = 0; j < b.length; j++) {
-        (conf.get(j) || []).forEach(p => { if (p.type === 'H') sh = { i: p.i, p: p.p, broken: false }; else sl = { i: p.i, p: p.p, broken: false }; });
+        (conf.get(j) || []).forEach(p => { if (p.type === 'H') { sh = { i: p.i, p: p.p, broken: false }; hs.push(p); } else { sl = { i: p.i, p: p.p, broken: false }; ls.push(p); } });
         const c = b[j].c;
         if (sh && !sh.broken && c > sh.p) {
-            events.push({ type: trend < 0 ? 'CHoCH' : 'BOS', dir: 1, level: sh.p, idx: j, swingIdx: sh.i });
+            const ch = trend < 0;
+            events.push({ type: ch ? 'CHoCH' : 'BOS', dir: 1, level: sh.p, idx: j, swingIdx: sh.i, str: ch ? hs.slice(-3).filter(x => x.p < c).length : 0 });
             sh.broken = true; trend = 1;
         } else if (sl && !sl.broken && c < sl.p) {
-            events.push({ type: trend > 0 ? 'CHoCH' : 'BOS', dir: -1, level: sl.p, idx: j, swingIdx: sl.i });
+            const ch = trend > 0;
+            events.push({ type: ch ? 'CHoCH' : 'BOS', dir: -1, level: sl.p, idx: j, swingIdx: sl.i, str: ch ? ls.slice(-3).filter(x => x.p > c).length : 0 });
             sl.broken = true; trend = -1;
         }
     }
@@ -827,7 +850,7 @@ function obForEvent(b, e) {
         if (e.dir > 0 ? c.c < c.o : c.c > c.o) { ob = i; break; }
     }
     if (ob < 0) ob = idx;
-    return { dir: e.dir, idx: ob, top: b[ob].h, bottom: b[ob].l, brk: e.idx, type: e.type };
+    return { dir: e.dir, idx: ob, top: b[ob].h, bottom: b[ob].l, brk: e.idx, type: e.type, str: e.str || 0 };
 }
 function obState(b, ob) {
     let touched = false, invalid = false;
@@ -869,6 +892,28 @@ function equalLevels(piv, a) {
     return { eqh: grp(piv.filter(p => p.type === 'H').slice(-8)), eql: grp(piv.filter(p => p.type === 'L').slice(-8)) };
 }
 const overlaps = (x, y) => x.bottom <= y.top && y.bottom <= x.top;
+/* Imbalance: มีแท่งสมบูรณ์ (เนื้อ ≥60% ของแท่ง และ ≥0.8 ATR) ในทิศเดียวกัน ระหว่าง OB → จุดที่เกิด BOS/CHoCH */
+function imbalanceOf(b, ob, a) {
+    for (let i = ob.idx + 1; i <= ob.brk && i < b.length; i++) {
+        const c = b[i], rg = c.h - c.l, bd = Math.abs(c.c - c.o);
+        if ((ob.dir > 0 ? c.c > c.o : c.c < c.o) && rg > 0 && bd / rg >= 0.6 && bd >= 0.8 * a) return true;
+    }
+    return false;
+}
+/* Retracement (บทที่ 6): ย่อสั้น/เล็กลง = ตลาดโลภ เทรนด์ไปต่อ; ย่อใหญ่/นานขึ้น = ตลาดลังเล เทรนด์ใกล้จบ */
+function readRetrace(b, piv, trend) {
+    if (!trend) return { state: 'na', text: 'ยังไม่มีเทรนด์ให้อ่านการย่อตัว' };
+    const legs = [];
+    for (let x = 1; x < piv.length; x++) {
+        const p = piv[x - 1], q = piv[x];
+        if (trend > 0 ? (p.type === 'H' && q.type === 'L') : (p.type === 'L' && q.type === 'H')) legs.push({ sz: Math.abs(p.p - q.p), n: q.i - p.i });
+    }
+    if (legs.length < 2) return { state: 'na', text: 'ข้อมูลการย่อตัวไม่พอ' };
+    const l = legs[legs.length - 1], p = legs[legs.length - 2];
+    if (l.sz > p.sz * 1.3 && l.n > p.n) return { state: 'tired', text: 'Retracement ใหญ่/นานขึ้น = ตลาดลังเล เทรนด์ใกล้จบ' };
+    if (l.sz <= p.sz) return { state: 'greedy', text: 'Retracement สั้น/เล็กลง = ตลาดโลภ เทรนด์ไปต่อ' };
+    return { state: 'mid', text: 'Retracement ขนาดใกล้เดิม' };
+}
 
 function analyzeTF(tf, rawBars) {
     const bars = normBars(rawBars);
@@ -889,6 +934,7 @@ function analyzeTF(tf, rawBars) {
     const lastL = [...recentPiv].reverse().find(p => p.type === 'L') || [...st.piv].reverse().find(p => p.type === 'L');
     const range = (lastH && lastL && lastH.p > lastL.p) ? { hi: lastH.p, lo: lastL.p, mid: (lastH.p + lastL.p) / 2 } : null;
     const fvgs = findFVGs(b, a);
+    const retr = readRetrace(b, st.piv, st.trend);
     const lastEv = st.events.length ? st.events[st.events.length - 1] : null;
 
     const allOBs = st.events.map(e => obState(b, obForEvent(b, e))).filter(o => !o.invalid);   // ไว้ใช้เป็นเป้า TP
@@ -899,16 +945,16 @@ function analyzeTF(tf, rawBars) {
         lastEvent: lastEv ? { type: lastEv.type, dir: lastEv.dir, level: lastEv.level, agoMins: (b.length - 1 - lastEv.idx) * tf.mins } : null,
         setup: null, reason: ''
     });
-    res.piv = st.piv;
+    res.piv = st.piv; res.retr = retr;
 
     // OB ในทิศของเทรนด์ปัจจุบัน: ต้องไม่ถูกทะลุ, ชอบอันที่ยังไม่ถูกแตะ
     // ต้องใหม่ (≤ MAX_AGE แท่ง) และอยู่ใกล้ราคา (≤ MAX_REACH ATR วัดถึง Entry1) → เลือกอันที่ใกล้ราคาที่สุด (OB ที่ถูกแตะแล้วโดนหักคะแนน)
     const reachOf = (dir, z) => { const e1 = dir > 0 ? z.top + ENTRY_FRONT * a : z.bottom - ENTRY_FRONT * a; return Math.max(0, dir > 0 ? lastClose - e1 : e1 - lastClose) / a; };
     const cands = (st.trend ? st.events.filter(e => e.dir === st.trend).map(e => obState(b, obForEvent(b, e))) : [])
         .filter(o => !o.invalid && (!maxAge || b.length - 1 - o.brk <= maxAge))
-        .map(o => Object.assign(o, { dist: reachOf(o.dir, o) }))
+        .map(o => Object.assign(o, { dist: reachOf(o.dir, o), imb: imbalanceOf(b, o, a) }))
         .filter(o => o.dist <= reach)
-        .sort((x, y) => (x.dist + (x.touched ? 0.75 : 0)) - (y.dist + (y.touched ? 0.75 : 0)));
+        .sort((x, y) => (x.dist + (x.touched ? 0.75 : 0) + (x.imb ? 0 : 1)) - (y.dist + (y.touched ? 0.75 : 0) + (y.imb ? 0 : 1)));
     const ob = cands[0];
     if (ob) {
         const dir = ob.dir;
@@ -922,8 +968,12 @@ function analyzeTF(tf, rawBars) {
             { ok: fvgHit, label: 'FVG ซ้อน OB' },
             { ok: !!sweep, label: 'Liquidity Sweep' },
             { ok: rightHalf, label: dir > 0 ? 'อยู่โซน Discount' : 'อยู่โซน Premium' },
-            { ok: !ob.touched, label: 'OB ยังไม่ถูกแตะ' }
+            { ok: !ob.touched, label: 'OB ยังไม่ถูกแตะ' },
+            { ok: !!ob.imb, label: 'Imbalance (แท่งสมบูรณ์)' },
+            { ok: (b[ob.idx].h - b[ob.idx].l) > 0 && Math.abs(b[ob.idx].c - b[ob.idx].o) / (b[ob.idx].h - b[ob.idx].l) >= 0.5, label: 'Balance เนื้อเทียนเยอะ' },
+            { ok: retr.state !== 'tired', label: retr.text }
         ];
+        if (ob.type === 'CHoCH') s.conf.push({ ok: ob.str >= 2, label: ob.str >= 2 ? 'CHoCH 2 โครงสร้าง (กลับตัวแน่นอน)' : 'CHoCH 1 โครงสร้าง (รอยืนยัน LTF)' });
         res.setup = s;
     } else {
         // ไม่มี OB ใช้ได้ → ไม่ปล่อยว่าง แสดง "โซนรอเข้า" (Breaker → FVG → OTE) แทน
@@ -1032,10 +1082,12 @@ function buildCounter(res, b, st, atr, dir, maxAge, k) {
 /* ตามเทรนด์ TF ใหญ่ + สรุปเกรด */
 function analyzeAll(barsByTf) {
     const out = TFS.map(tf => analyzeTF(tf, barsByTf[tf.key]));
+    const htfZone = (z, dir, i) => out.slice(i + 1).some(x => x.ok && (x.tpObs || []).some(o => o.dir === dir && overlaps(o, z)));
     out.forEach((r, i) => {
         if (r.ok && r.alt) {
             const higher = out.slice(i + 1).filter(x => x.ok && x.trend);
             if (higher.length) r.alt.conf.push({ ok: higher.filter(x => x.trend === r.alt.dir).length > higher.length / 2, label: 'ตามเทรนด์ TF ใหญ่' });
+            if (i < out.length - 1) r.alt.conf.push({ ok: htfZone(r.alt.zone, r.alt.dir, i), label: 'อยู่ในโซน OB ของ TF ใหญ่' });
             r.alt.score = r.alt.conf.filter(c => c.ok).length; r.alt.total = r.alt.conf.length; r.alt.grade = 'CT';
         }
         if (!r.ok || !r.setup) return;
@@ -1044,6 +1096,7 @@ function analyzeAll(barsByTf) {
             const same = higher.filter(x => x.trend === r.setup.dir).length;
             r.setup.conf.push({ ok: same > higher.length / 2, label: 'ตามเทรนด์ TF ใหญ่' });
         }
+        if (i < out.length - 1) r.setup.conf.push({ ok: htfZone(r.setup.zone, r.setup.dir, i), label: 'อยู่ในโซน OB ของ TF ใหญ่' });
         r.setup.score = r.setup.conf.filter(c => c.ok).length;
         r.setup.total = r.setup.conf.length;
         const ratio = r.setup.score / r.setup.total;
@@ -1518,7 +1571,7 @@ function renderDetail() {
     const items = [];
     items.push(`<div class="channel-card" style="border-left:4px solid var(--gold);"><div class="channel-title">Structure (${tfL})</div>
         <div class="channel-val">${trendText(a)}</div><div class="channel-val" style="font-size:11px;color:var(--text-dim);">${esc(eventText(a))}</div>
-        ${a.range ? `<div class="channel-val" style="color:var(--down);">Swing High: ${fmt(a.range.hi, r)}</div><div class="channel-val" style="color:var(--up);">Swing Low: ${fmt(a.range.lo, r)}</div><div class="channel-val" style="color:var(--text-dim);">Equilibrium: ${fmt(a.range.mid, r)}</div>` : ''}</div>`);
+        <div class="channel-val" style="font-size:11px;color:var(--gold);">${esc(a.retr ? a.retr.text : '')}</div>${a.range ? `<div class="channel-val" style="color:var(--down);">Swing High: ${fmt(a.range.hi, r)}</div><div class="channel-val" style="color:var(--up);">Swing Low: ${fmt(a.range.lo, r)}</div><div class="channel-val" style="color:var(--text-dim);">Equilibrium: ${fmt(a.range.mid, r)}</div>` : ''}</div>`);
     items.push(`<div class="channel-card" style="border-left:4px solid var(--purple);"><div class="channel-title">Liquidity Pools</div>
         <div class="channel-val" style="color:var(--down);">EQH: ${a.eqh ? fmt(a.eqh, r) : 'ไม่พบ'}</div><div class="channel-val" style="color:var(--up);">EQL: ${a.eql ? fmt(a.eql, r) : 'ไม่พบ'}</div>
         <div class="channel-val" style="font-size:11px;color:var(--text-dim);">${v.active && v.s.sweep ? 'Sweep ล่าสุดที่ ' + fmt(v.s.sweep.level, r) : 'ยังไม่พบ liquidity sweep ล่าสุด'}</div></div>`);
