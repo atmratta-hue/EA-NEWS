@@ -550,7 +550,7 @@
                 <div class="zone-group" id="tp-sl-zones-container"></div>
 
                 <div style="margin-top: 10px; font-size: 11px; color: var(--text-dim); text-align: right;" id="sig-mode-desc"></div>
-                <div class="disclaimer">ทุก TF คำนวณจากแท่งเทียนที่ปิดแล้วของ TF นั้นเอง และอัปเดตทุก 1 นาที · ถ้าไม่มี setup ที่เข้าเงื่อนไขจะแสดง NO ZONE · เพื่อการศึกษาเท่านั้น ไม่ใช่คำแนะนำการลงทุน</div>
+                <div class="disclaimer">ทุก TF คำนวณจากแท่งเทียนรวมแท่งที่กำลังก่อตัว (ราคาสด) คำนวณใหม่ทุก ~1 วินาที และซิงก์แท่งเทียน M1–M15 จาก API ทุก 10 วินาที · ถ้าไม่มี setup ที่เข้าเงื่อนไขจะแสดง NO ZONE · เพื่อการศึกษาเท่านั้น ไม่ใช่คำแนะนำการลงทุน</div>
             </div>
 
             <div class="card">
@@ -566,7 +566,7 @@
     <div class="card">
         <div class="card-header">
             <span class="card-title">🧭 Multi-Timeframe Signal Board (SMC)</span>
-            <span id="board-meta" style="font-size:11px; color:var(--text-dim);">อัปเดตทุก 1 นาที</span>
+            <span id="board-meta" style="font-size:11px; color:var(--text-dim);">เรียลไทม์ · คำนวณใหม่ทุก ~1 วินาที</span>
         </div>
         <div id="mtf-summary" style="margin-bottom:10px;"></div>
         <div class="tf-board" id="tf-board"></div>
@@ -675,6 +675,8 @@ const ENTRY_FRONT = 0.2;
 /* TP1/TP2/TP3: ระยะอย่างน้อย max(RR × R, ATR × ตาราง) — TF ใหญ่ขึ้น RR และระยะ ATR ยิ่งมากขึ้น */
 const TP_RR  = { '1m': [1.5, 2.5, 4], '5m': [1.5, 3, 5], '15m': [2, 3.5, 6], '1h': [2, 4, 7], '4h': [2.5, 5, 8] };
 const TP_ATR = { '1m': [2, 3.5, 5.5], '5m': [2.5, 4.5, 7], '15m': [3, 5.5, 8.5], '1h': [3, 6, 10], '4h': [3.5, 7, 11] };
+/* เรียลไทม์: ใช้แท่งที่กำลังก่อตัว (ราคาสด) ในการวิเคราะห์, คำนวณใหม่ตามราคาทุก LIVE_MS, ซิงก์แท่ง M1–M15 จาก API ทุก FAST_MS */
+const LIVE_BAR = true, LIVE_MS = 1000, FAST_MS = 10000;
 const SYNC_MS = 60000;          // วิเคราะห์ใหม่ทุก TF ทุก 1 นาที
 const NEWS_MS = 5 * 60000;      // ข่าวของสินทรัพย์ที่เปิดอยู่ ทุก 5 นาที
 const NEWS_BG_MS = 30 * 60000;  // ข่าวสินทรัพย์อื่น ทุก 30 นาที
@@ -921,7 +923,7 @@ function analyzeTF(tf, rawBars) {
     const base = { key: tf.key, label: tf.label, mins: tf.mins, nBars: bars.length };
     if (bars.length < 30) return Object.assign(base, { ok: false, reason: `ข้อมูลไม่พอ (${bars.length} แท่ง)` });
 
-    const closed = bars.slice(0, -1);               // แท่งที่ปิดแล้วเท่านั้น
+    const closed = LIVE_BAR ? bars : bars.slice(0, -1);               // แท่งที่ปิดแล้วเท่านั้น
     const lb = LOOKBACK[tf.key];
     const b = lb ? closed.slice(-lb) : closed;      // M1/M5: ใช้เฉพาะ 50 แท่งล่าสุด
     const lastClose = bars[bars.length - 1].c;
@@ -1345,7 +1347,7 @@ const S = {
     news: {}, nextNews: {}, inflight: {}, seen: {}, shared: { ts: 0, p: null },
     calendar: { events: [], ts: 0, ok: null, src: '' }, nextCal: 0, released: new Set(),
     filter: 'all', sort: 'important', briefDay: '', briefLabel: '',
-    flipped: new Set(), ws: null, pollT: null, priceEpoch: 0, started: false, lastMinuteCheck: 0
+    flipped: new Set(), ws: null, pollT: null, priceEpoch: 0, started: false, lastMinuteCheck: 0, lastLive: 0, lastFast: 0, fasting: false
 };
 const $ = id => document.getElementById(id);
 const store = {
@@ -1387,6 +1389,26 @@ async function fetchCandles(tf, limit) {
    รอบวิเคราะห์ SMC ทุก 1 นาที — คำนวณ "ทุก TF พร้อมกัน" แยกอิสระ
    --------------------------------------------------------------------- */
 const nextBoundary = () => (Math.floor(Date.now() / 60000) + 1) * 60000 + 2000;
+/* แท่งสำหรับวิเคราะห์: อัปเดตแท่งล่าสุดด้วยราคาสด และสร้างแท่งใหม่ทันทีเมื่อขึ้นช่วงเวลาใหม่ (ไม่รอ API) */
+function patchLive(b, tf) {
+    const p = S.price; if (!b.length || !(p > 0)) return b;
+    const l = b[b.length - 1];
+    if (typeof l.t === 'number') {
+        const k = l.t < 1e12 ? 1000 : 1, span = tf.mins * 60000, tm = l.t * k, n = Math.floor((Date.now() - tm) / span);
+        if (n >= 1) return b.concat([{ o: p, h: p, l: p, c: p, v: 0, t: (tm + n * span) / k }]);
+    }
+    return b.slice(0, -1).concat([Object.assign({}, l, { c: p, h: Math.max(l.h, p), l: Math.min(l.l, p) })]);
+}
+function liveInput() { const o = {}; TFS.forEach(tf => { o[tf.key] = patchLive(normBars(S.bars[tf.key]), tf); }); return o; }
+async function fastSync() {
+    S.fasting = true; S.lastFast = Date.now(); const ep = S.epoch, keys = ['1m', '5m', '15m'];
+    try {
+        const res = await Promise.all(keys.map(k => candlesRaw(k, TFS.find(x => x.key === k).limit)));
+        if (ep !== S.epoch) return;
+        keys.forEach((k, i) => { if (res[i].length >= 30) S.bars[k] = res[i]; });
+        S.analysis = analyzeAll(liveInput()); checkStops(); renderBoard(); renderDetail();
+    } finally { S.fasting = false; }
+}
 async function syncAll() {
     if (S.syncing) return;
     S.syncing = true;
@@ -1399,7 +1421,7 @@ async function syncAll() {
         TFS.forEach((tf, i) => { S.bars[tf.key] = res[i]; });
         const m1 = normBars(S.bars['1m']);
         if (m1.length && (Date.now() - S.lastTick > 20000 || !S.price)) onPrice(m1[m1.length - 1].c, true);
-        S.analysis = analyzeAll(S.bars);
+        S.analysis = analyzeAll(liveInput());
         S.lastSync = Date.now();
         S.okTf = S.analysis.filter(a => a.ok).length;
         checkStops();
@@ -1453,6 +1475,7 @@ function onPrice(p, force) {
     const now = Date.now();
     if (!force && now - S.lastRender < 500) return;
     S.lastRender = now;
+    if (S.bars['1m'] && now - S.lastLive >= LIVE_MS) { S.lastLive = now; try { S.analysis = analyzeAll(liveInput()); } catch (e) { /* ใช้ผลเดิม */ } }
     checkStops();
     const el = $('val-realtime-price'); if (el) el.textContent = `$${fmt(p)}`;
     renderBoard(); renderDetail();
@@ -2035,6 +2058,7 @@ function checkMorning() {
 function tick() {
     const now = Date.now();
     if (now >= S.nextSync && !S.syncing) syncAll();
+    else if (now - S.lastFast > FAST_MS && !S.syncing && !S.fasting && S.bars['1m']) fastSync();
     if (S.started) S.watch.forEach(k => { if (!S.inflight[k] && now >= (S.nextNews[k] || 0)) refreshNews(k); });
     if (now >= S.nextCal) loadCalendar();
     checkReleases();
