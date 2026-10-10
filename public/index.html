@@ -1152,6 +1152,7 @@ function volProfile(seg, lo, hi, n = 24) {
    FVG: เข้ากลาง FVG, SL เลยขอบ FVG 50% ของขนาด FVG, TP 1.3–1.5R */
 function punport(r, dir) {
     if (!r.ok || !dir || !r.b) return null;
+    if (r.paRef && !r.paRef.ok) return null;                      // LQ ลึกเกิน 65% → ยกเลิกแผน (Punport)
     const b = r.b, a = r.atr, px = r.lastClose, out = { dir, vp: null, fvg: null };
     const s0 = [...r.piv].reverse().find(p => p.type === (dir > 0 ? 'L' : 'H'));
     if (s0) {
@@ -1173,7 +1174,7 @@ function punport(r, dir) {
 }
 function punCardHTML(a, r) {
     const p = a.pun, kz = killZone(), c = x => fmt(x, r);
-    const head = `<div class="channel-title">⚙️ Punport: Volume Profile & FVG</div><div class="channel-val" style="font-size:11px;color:${kz ? 'var(--up)' : 'var(--text-dim)'};">Kill zone: ${kz || 'นอกเวลา'}</div>`;
+    const head = `<div class="channel-title">⚙️ Punport: Volume Profile & FVG</div><div class="channel-val" style="font-size:11px;color:${kz ? 'var(--up)' : 'var(--text-dim)'};">Kill zone: ${kz || 'นอกเวลา'}</div>${punExtra(a)}`;
     if (!p) return `<div class="channel-card" style="border-left:4px solid var(--gold2);">${head}<div class="channel-val" style="font-size:11px;color:var(--text-dim);">ยังไม่มีทิศทาง TF4H / ยังไม่มีขา momentum หรือ FVG ที่ใช้ได้</div></div>`;
     const d = p.dir > 0 ? '🟢 BUY' : '🔴 SELL';
     const vp = p.vp ? `<div class="channel-val" style="margin-top:6px;">${d} Volume Profile (${p.vp.real ? 'Volume' : 'Time-price'})</div><div class="channel-val" style="font-size:11px;color:var(--text-dim);">VAH ${c(p.vp.vah)} · POC ${c(p.vp.poc)} (${Math.round(p.vp.pos * 100)}%) · VAL ${c(p.vp.val)}</div><div class="channel-val">Entry @${p.vp.lvlName}: ${c(p.vp.e)} (${p.vp.gap.toFixed(1)} ATR)</div><div class="channel-val" style="color:var(--down);">SL: ${c(p.vp.sl)}</div><div class="channel-val" style="color:var(--gold);">TP: ${p.vp.tps.map(c).join(' / ')} (RR 1.3–2.0)</div>` : '';
@@ -1246,7 +1247,7 @@ function buildMaster(r, dir4) {
     const s = r.setup, p = r.pun, f = r.fvp;
     if (s) add(s.dir, s.kind === 'ob' ? 'SMC OB' : 'SMC ' + (KIND_LABEL[s.kind] || 'โซน'), s.kind === 'ob' ? 3 + (s.grade === 'A' ? 1 : 0) : 1.5, s.zone.bottom, s.zone.top, s.sl, s.tps);
     if (r.alt) add(r.alt.dir, 'สวนเทรนด์', 1, r.alt.zone.bottom, r.alt.zone.top, r.alt.sl, r.alt.tps);
-    if (p && p.vp) add(p.dir, 'VP ' + p.vp.lvlName, 2, p.vp.lvl - 0.3 * a, p.vp.lvl + 0.3 * a, p.vp.sl, p.vp.tps);
+    if (p && p.vp) add(p.dir, 'VP ' + p.vp.lvlName + (r.paRef && r.paRef.ok && !r.paRef.waitLQ ? ' + PA/LQ' : ''), 2 + (r.paRef && r.paRef.ok && !r.paRef.waitLQ ? 1 : 0), p.vp.lvl - 0.3 * a, p.vp.lvl + 0.3 * a, p.vp.sl, p.vp.tps);
     if (p && p.fvg) { const q = 0.25 * (p.fvg.top - p.fvg.bottom); add(p.dir, 'FVG 50%', 2, p.fvg.e - q, p.fvg.e + q, p.fvg.sl, p.fvg.tps); }
     if (f && f.dir) add(f.dir, 'Fib+VP' + (f.wait ? ' (รอกลับตัว)' : ''), (f.wait ? 1.5 : 2) + (f.fibHit ? 0.5 : 0), f.lvl - f.w, f.lvl + f.w, f.sl, f.tps);
     const bb = r.b, side = detectSideway(bb, a); r.side = side;
@@ -1292,7 +1293,7 @@ function buildMaster(r, dir4) {
         const R = Math.abs(e - sl), tps = [];
         grp.flatMap(c => c.tps).filter(x => dir * (x - e) >= 1.2 * R).sort((x, y) => dir * (x - y)).forEach(x => { if (tps.length < 3 && (!tps.length || Math.abs(x - tps[tps.length - 1]) > 0.3 * R)) tps.push(x); });
         [1.5, 2.5, 4].forEach(m => { if (tps.length < 3) { const x = e + dir * m * R; if (!tps.length || dir * (x - tps[tps.length - 1]) > 0.3 * R) tps.push(x); } });
-        const tr = side ? 0 : (dir4 ? (dir === dir4 ? 1.5 : -1) : 0) + (r.trend ? (dir === r.trend ? 1 : -1) : 0);   // สวนเทรนด์ทั้ง H4 และ TF นี้ = หักคะแนน
+        const tr = side ? 0 : (dir4 ? (dir === dir4 ? 1.5 : -1) : 0) + (r.trend ? (dir === r.trend ? 1 : -1) : 0) + momAdj(r, dir, dir4);   // สวนเทรนด์ทั้ง H4 และ TF นี้ = หักคะแนน
         const score = grp.reduce((q, c) => q + c.wt, 0) + tr + (s && s.sweep && s.dir === dir ? 1 : 0);
         cl.push({ dir, zone: z, e, sl, tps: tps.slice(0, 3), rr: tps.slice(0, 3).map(x => Math.abs(x - e) / R), score, grade: score >= 7 ? 'A+' : score >= 5 ? 'A' : score >= 3.5 ? 'B' : 'C', sideway: !!side, srcs: [...new Set(grp.map(c => c.src))], gap: Math.max(0, dir > 0 ? px - z.hi : z.lo - px) / a });
     });
@@ -1344,12 +1345,62 @@ function fillMaster(a, r, ez, tz, chips) {
     chips.innerHTML = m.srcs.map(x => `<span class="cf on">✓ ${esc(x)}</span>`).join('') + ` <span class="cf on">MASTER ${m.grade}</span>`;
 }
 
+/* =====================================================================
+   Punport (ส่วนเพิ่ม): ยืนยันทิศ 4H ด้วย MACD + RSI Divergence · Price Action (Engulfing / Three inside) · กฎ LQ ≤ 65% · เช็กความผันผวน
+   ===================================================================== */
+function emaArr(v, n) { const k = 2 / (n + 1); let e = v[0]; return v.map((x, i) => i ? (e = x * k + e * (1 - k)) : e); }
+function rsiArr(c, n = 14) {
+    const o = new Array(c.length).fill(50); let g = 0, l = 0;
+    for (let i = 1; i < c.length; i++) {
+        const d = c[i] - c[i - 1], u = Math.max(d, 0), w = Math.max(-d, 0);
+        if (i <= n) { g += u / n; l += w / n; } else { g = (g * (n - 1) + u) / n; l = (l * (n - 1) + w) / n; }
+        if (i >= n) o[i] = l === 0 ? 100 : 100 - 100 / (1 + g / l);
+    }
+    return o;
+}
+/* MACD(12,26,9) ต้องตามทิศและ histogram ยังขยาย = Momentum เหลือ · RSI: ราคาทำสวิงใหม่แต่ RSI ไม่ทำตาม = Divergence (ขาด Momentum) */
+function mom4h(r) {
+    if (!r || !r.ok || !r.b || r.b.length < 40 || !r.trend) return null;
+    const c = r.b.map(x => x.c), e12 = emaArr(c, 12), e26 = emaArr(c, 26), mc = e12.map((x, i) => x - e26[i]), sg = emaArr(mc, 9), h = mc.map((x, i) => x - sg[i]), n = c.length - 1, dir = r.trend, rs = rsiArr(c);
+    const ps = r.piv.filter(p => p.type === (dir > 0 ? 'H' : 'L')).slice(-2);
+    const div = ps.length === 2 && (dir > 0 ? ps[1].p > ps[0].p && rs[ps[1].i] < rs[ps[0].i] : ps[1].p < ps[0].p && rs[ps[1].i] > rs[ps[0].i]);
+    const lb = r.b[r.b.length - 1];
+    return { dir, macdOk: dir * h[n] > 0, strong: dir * (h[n] - h[n - 1]) > 0, div, rsi: rs[n], volHigh: (lb.h - lb.l) >= 2 * r.atr };
+}
+/* Price Action ตามเทรนด์ (ใช้ TF 15m/1h แทน 30m–2H): Engulfing ตัวใหญ่ หรือ Three inside → Trading range (SL ไกลสุด = ปลายไส้) → วัดความลึกแท่ง LQ */
+function detectPA(r, dir) {
+    if (!r.ok || !r.b || !dir) return null;
+    const b = r.b.slice(0, -1), a = r.atr; if (b.length < 8) return null;
+    const bd = x => Math.abs(x.c - x.o), bu = x => x.c > x.o;
+    for (let e = b.length - 1; e >= b.length - 6; e--) {
+        const c1 = b[e], c0 = b[e - 1], c00 = b[e - 2]; let kind = null, s0 = e - 1;
+        if ((dir > 0 ? !bu(c0) && bu(c1) && c1.c >= c0.o && c1.o <= c0.c : bu(c0) && !bu(c1) && c1.c <= c0.o && c1.o >= c0.c) && bd(c1) >= a) kind = 'Engulfing';
+        if (!kind && c00 && (dir > 0 ? !bu(c00) && bu(c1) && c1.c > c00.o : bu(c00) && !bu(c1) && c1.c < c00.o) && bd(c00) >= 0.8 * a && bd(c0) <= 0.5 * bd(c00)) { kind = 'Three inside'; s0 = e - 2; }
+        if (!kind) continue;
+        const seg = b.slice(s0, e + 1), hi = Math.max(...seg.map(x => x.h)), lo = Math.min(...seg.map(x => x.l)); if (hi - lo < 0.6 * a) continue;
+        const af = r.b.slice(e + 1), lq = dir > 0 ? Math.min(hi, ...af.map(x => x.l)) : Math.max(lo, ...af.map(x => x.h));
+        const depth = Math.max(0, dir > 0 ? (hi - lq) / (hi - lo) : (lq - lo) / (hi - lo));
+        return { tf: r.key, kind, dir, hi, lo, depth, ok: depth <= 0.65, waitLQ: depth < 0.02 };
+    }
+    return null;
+}
+const momAdj = (r, dir, dir4) => { const m = r.mom; return (!m || !dir4 || dir !== dir4) ? 0 : (m.macdOk ? 1 : -1) + (m.strong ? 0.5 : 0) + (m.div ? -1.5 : 0.5) - (m.volHigh ? 1 : 0); };
+function punExtra(a) {
+    const m = a.mom, pa = a.paRef, d = 'font-size:11px;color:var(--text-dim);';
+    let h = m ? `<div class="channel-val" style="${d}">4H: MACD ${m.macdOk ? '✓ ตามทิศ' : '✗ ขัดทิศ'} · ${m.strong ? 'Momentum เพิ่ม' : 'Momentum ลด'} · RSI ${m.rsi.toFixed(0)} ${m.div ? '<span style="color:var(--down)">⚠️ Divergence</span>' : '✓ Convergence'}${m.volHigh ? ' · <span style="color:var(--gold)">⚠️ ผันผวนผิดปกติ</span>' : ''}</div>` : '';
+    h += pa ? `<div class="channel-val" style="font-size:11px;color:${pa.ok ? 'var(--up)' : 'var(--down)'};">PA ${pa.tf}: ${pa.dir > 0 ? 'Bullish' : 'Bearish'} ${pa.kind} · LQ ${pa.waitLQ ? 'รอแท่ง LQ' : Math.round(pa.depth * 100) + '%'} ${pa.ok ? '(≤65% เทรดได้)' : '(ลึกเกิน 65% ยกเลิกแผน)'}</div>` : `<div class="channel-val" style="${d}">PA: ยังไม่พบ Engulfing/Three inside ตามเทรนด์ 4H</div>`;
+    return h;
+}
+
 /* ตามเทรนด์ TF ใหญ่ + สรุปเกรด */
 function analyzeAll(barsByTf) {
     const out = TFS.map(tf => analyzeTF(tf, barsByTf[tf.key]));
     const htfZone = (z, dir, i) => out.slice(i + 1).some(x => x.ok && (x.tpObs || []).some(o => o.dir === dir && overlaps(o, z)));
     const h4 = out.find(x => x.key === '4h'), dir4 = h4 && h4.ok ? h4.trend : 0;
-    out.forEach(r => { r.pun = punport(r, dir4); r.fvp = fibVP(r); });
+    const m4 = mom4h(h4);
+    out.forEach(r => { r.mom = m4; r.pa = (r.key === '1h' || r.key === '15m') ? detectPA(r, dir4) : null; });
+    const paRef = (out.find(x => x.key === '1h' && x.pa) || out.find(x => x.key === '15m' && x.pa) || {}).pa || null;
+    out.forEach(r => { r.paRef = paRef; r.pun = punport(r, dir4); r.fvp = fibVP(r); });
     out.forEach((r, i) => {
         if (r.ok && r.alt) {
             const higher = out.slice(i + 1).filter(x => x.ok && x.trend);
